@@ -18,6 +18,8 @@ print("==============================")
 -- 存储连接的客户端
 local clients = {}
 local clientCounter = 0
+-- 存储发送给客户端的命令，用于生成有意义的文件名
+local pendingCommands = {}
 
 -- 设置服务器为非阻塞模式
 server:settimeout(0)
@@ -50,8 +52,37 @@ local function processNetwork()
                 -- 检查是否是命令执行结果
                 local result = line:match("^RESULT:(.*)$")
                 if result then
-                    print("收到来自 " .. clientId .. " 的命令执行结果:")
-                    print("  " .. result)
+                    -- 生成文件名：客户端ID + 命令名 + 时间
+                    local timestamp = os.date("%Y%m%d_%H%M%S")
+                    local cmdName = "unknown"
+                    local fullCommand = "未知命令"
+                    
+                    -- 尝试获取对应的命令名
+                    if pendingCommands[clientId] then
+                        fullCommand = pendingCommands[clientId]
+                        cmdName = fullCommand:match("^(%S+)") or "unknown"
+                        cmdName = cmdName:gsub("[^%w%-_]", "_")  -- 替换特殊字符
+                        pendingCommands[clientId] = nil  -- 清除已处理的命令
+                    end
+                    
+                    -- 确保 outputs 目录存在
+                    local outputDir = "outputs"
+                    os.execute("mkdir -p " .. outputDir)  -- 创建目录（如果不存在）
+                    
+                    local filename = outputDir .. "/" .. clientId .. "_" .. cmdName .. "_" .. timestamp .. ".txt"
+                    
+                    local file = io.open(filename, "w")
+                    if file then
+                        file:write("客户端ID: " .. clientId .. "\n")
+                        file:write("执行命令: " .. fullCommand .. "\n")
+                        file:write("接收时间: " .. os.date("%Y-%m-%d %H:%M:%S") .. "\n")
+                        file:write("=" .. string.rep("=", 50) .. "\n")
+                        file:write(result)
+                        file:close()
+                        print("收到来自 " .. clientId .. " 的命令执行结果，已保存到文件: " .. filename)
+                    else
+                        print("收到来自 " .. clientId .. " 的命令执行结果，但无法写入文件: " .. filename)
+                    end
                 else
                     print("收到来自 " .. clientId .. " 的消息: " .. line)
                 end
@@ -101,6 +132,8 @@ local function processCommand(input)
                 local success = clientInfo.socket:send("CMD:" .. message .. "\n")
                 if success then
                     count = count + 1
+                    -- 记录发送给该客户端的命令，用于后续文件命名
+                    pendingCommands[clientId] = message
                 end
             end
         end
