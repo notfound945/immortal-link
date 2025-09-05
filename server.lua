@@ -4,45 +4,159 @@ local socket = require("socket")
 local server = assert(socket.bind("*", 8080))
 local ip, port = server:getsockname()
 
-print("Server listening on " .. ip .. ":" .. port .. "...")
-print("使用 'exit' 命令可以关闭连接")
+print("=== Immortal Link 服务器 ===")
+print("监听地址: " .. ip .. ":" .. port)
+print("输入命令:")
+print("  send <消息>     - 向所有客户端发送消息")
+print("  broadcast <消息> - 广播消息")
+print("  clients         - 显示连接的客户端")
+print("  quit           - 退出服务器")
+print("输入多行命令后按 Ctrl+D (EOF) 执行")
+print("==============================")
 
-while true do
-    -- 等待客户端连接（阻塞）
+-- 存储连接的客户端
+local clients = {}
+local clientCounter = 0
+
+-- 设置服务器为非阻塞模式
+server:settimeout(0)
+
+-- 创建协程来处理网络事件
+local function processNetwork()
+    -- 尝试接受新的客户端连接
     local client = server:accept()
-    client:settimeout(0)  -- 非阻塞模式，便于处理多个客户端
-    
-    print("新客户端连接")
-    
-    -- 长连接：保持连接，持续通信
-    while true do
-        -- 接收数据
-        local line, err, partial = client:receive()
+    if client then
+        clientCounter = clientCounter + 1
+        local clientId = "client-" .. clientCounter
+        clients[clientId] = {
+            socket = client,
+            id = clientId,
+            connected = true
+        }
+        client:settimeout(0)  -- 设置客户端为非阻塞模式
+        print("新客户端连接: " .. clientId)
         
-        -- 处理接收结果
-        if not err then
-            -- 客户端发送了完整数据
-            print("Received from client: " .. line)
-            
-            -- 如果客户端发送exit命令，则关闭连接
-            if line == "exit" then
-                client:send("连接即将关闭，再见！\n")
-                break
-            end
-            
-            -- 回复消息
-            client:send("服务器已收到: " .. line .. "\n")
-        elseif err ~= "timeout" then
-            -- 发生错误（非超时），关闭连接
-            print("连接错误: " .. tostring(err))
-            break
-        end
-        
-        -- 短暂休眠，避免CPU占用过高
-        socket.sleep(0.1)
+        -- 发送欢迎消息
+        client:send("欢迎连接到服务器！你的ID是: " .. clientId .. "\n")
     end
     
-    -- 关闭客户端连接
-    client:close()
-    print("客户端连接已关闭")
+    -- 处理现有客户端
+    for clientId, clientInfo in pairs(clients) do
+        if clientInfo.connected then
+            local client = clientInfo.socket
+            local line, err = client:receive()
+            if line then
+                print("收到来自 " .. clientId .. " 的消息: " .. line)
+            elseif err and err ~= "timeout" then
+                print("客户端 " .. clientId .. " 断开连接")
+                client:close()
+                clients[clientId] = nil
+            end
+        end
+    end
 end
+
+-- 处理命令的函数
+local function processCommand(input)
+    local cmd, message = input:match("^(%S+)%s*(.*)$")
+    cmd = cmd or input
+    message = message or ""
+    
+    if cmd == "send" and message ~= "" then
+        local count = 0
+        for clientId, clientInfo in pairs(clients) do
+            if clientInfo.connected then
+                local success = clientInfo.socket:send(message .. "\n")
+                if success then
+                    count = count + 1
+                end
+            end
+        end
+        print("消息已发送给 " .. count .. " 个客户端")
+        
+    elseif cmd == "broadcast" and message ~= "" then
+        local count = 0
+        for clientId, clientInfo in pairs(clients) do
+            if clientInfo.connected then
+                local success = clientInfo.socket:send("[广播] " .. message .. "\n")
+                if success then
+                    count = count + 1
+                end
+            end
+        end
+        print("广播消息已发送给 " .. count .. " 个客户端")
+        
+    elseif cmd == "clients" then
+        local count = 0
+        for clientId, clientInfo in pairs(clients) do
+            if clientInfo.connected then
+                print("  " .. clientId)
+                count = count + 1
+            end
+        end
+        print("总共 " .. count .. " 个客户端在线")
+        
+    elseif cmd == "quit" then
+        for clientId, clientInfo in pairs(clients) do
+            if clientInfo.connected then
+                clientInfo.socket:send("服务器即将关闭，再见！\n")
+                clientInfo.socket:close()
+            end
+        end
+        return false  -- 退出
+        
+    elseif cmd == "send" and message == "" then
+        print("用法: send <消息>")
+        
+    elseif cmd == "broadcast" and message == "" then
+        print("用法: broadcast <消息>")
+        
+    else
+        print("未知命令: " .. input)
+        print("可用命令: send <消息>, broadcast <消息>, clients, quit")
+    end
+    
+    return true  -- 继续运行
+end
+
+-- 主循环：等待完整输入
+while true do
+    -- 持续处理网络事件
+    processNetwork()
+    
+    print("\n请输入命令 (多行输入后按 Ctrl+D 执行):")
+    io.write("server> ")
+    io.flush()
+    
+    -- 读取所有输入直到EOF
+    local commands = {}
+    while true do
+        local line = io.read()
+        if not line then  -- EOF
+            break
+        end
+        -- 简单的去除首尾空白字符（Lua 5.1兼容）
+        line = line:match("^%s*(.-)%s*$")
+        if line ~= "" then
+            table.insert(commands, line)
+        end
+    end
+    
+    -- 处理所有命令
+    local shouldContinue = true
+    for _, cmd in ipairs(commands) do
+        print("执行命令: " .. cmd)
+        shouldContinue = processCommand(cmd)
+        if not shouldContinue then
+            break
+        end
+    end
+    
+    if not shouldContinue then
+        break
+    end
+end
+
+-- 关闭服务器
+server:close()
+print("服务器已关闭")

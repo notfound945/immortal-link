@@ -33,35 +33,32 @@ if not success then
 end
 
 print("已连接到服务器 " .. host .. ":" .. port)
-print("请输入消息发送（输入 'exit' 断开连接）")
+print("等待服务器消息...")
 
--- 长连接：保持连接，持续通信
+-- 设置非阻塞模式，持续接收服务器消息
+tcp:settimeout(1)  -- 1秒超时
+
+-- 长连接：只接收服务器消息
 while true do
-    -- 读取用户输入
-    io.write("> ")
-    io.flush()
-    local input = io.read()
-    
-    if not input then  -- 处理Ctrl+D等输入结束情况
-        input = "exit"
-    end
-    
-    -- 发送数据
-    tcp:send(input .. "\n")
-    
-    -- 如果输入exit，则退出循环
-    if input == "exit" then
-        break
-    end
-    
-    -- 接收服务器回复
+    -- 接收服务器消息
     local response, err = tcp:receive()
-    if not err then
-        print("服务器回复: " .. response)
-    else
-        print("接收错误: " .. tostring(err))
+    if response then
+        print("[服务器消息] " .. response)
+        
+        -- 如果服务器发送断开消息，则退出
+        if response:match("再见") or response:match("断开") then
+            break
+        end
+    elseif err and err ~= "timeout" then
+        print("连接错误: " .. tostring(err))
         break
+    else
+        -- 超时，继续等待（可以在这里添加心跳检测）
+        -- print("等待服务器消息...")
     end
+    
+    -- 短暂休眠
+    socket.sleep(0.1)
 end
 
 -- 关闭连接
