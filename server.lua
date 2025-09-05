@@ -9,6 +9,7 @@ print("监听地址: " .. ip .. ":" .. port)
 print("输入命令:")
 print("  send <消息>     - 向所有客户端发送消息")
 print("  broadcast <消息> - 广播消息")
+print("  exec <命令>     - 让所有客户端执行系统命令")
 print("  clients         - 显示连接的客户端")
 print("  quit           - 退出服务器")
 print("输入多行命令后按 Ctrl+D (EOF) 执行")
@@ -46,7 +47,14 @@ local function processNetwork()
             local client = clientInfo.socket
             local line, err = client:receive()
             if line then
-                print("收到来自 " .. clientId .. " 的消息: " .. line)
+                -- 检查是否是命令执行结果
+                local result = line:match("^RESULT:(.*)$")
+                if result then
+                    print("收到来自 " .. clientId .. " 的命令执行结果:")
+                    print("  " .. result)
+                else
+                    print("收到来自 " .. clientId .. " 的消息: " .. line)
+                end
             elseif err and err ~= "timeout" then
                 print("客户端 " .. clientId .. " 断开连接")
                 client:close()
@@ -86,6 +94,18 @@ local function processCommand(input)
         end
         print("广播消息已发送给 " .. count .. " 个客户端")
         
+    elseif cmd == "exec" and message ~= "" then
+        local count = 0
+        for clientId, clientInfo in pairs(clients) do
+            if clientInfo.connected then
+                local success = clientInfo.socket:send("CMD:" .. message .. "\n")
+                if success then
+                    count = count + 1
+                end
+            end
+        end
+        print("命令 '" .. message .. "' 已发送给 " .. count .. " 个客户端执行")
+        
     elseif cmd == "clients" then
         local count = 0
         for clientId, clientInfo in pairs(clients) do
@@ -111,9 +131,13 @@ local function processCommand(input)
     elseif cmd == "broadcast" and message == "" then
         print("用法: broadcast <消息>")
         
+    elseif cmd == "exec" and message == "" then
+        print("用法: exec <命令>")
+        print("示例: exec pwd")
+        
     else
         print("未知命令: " .. input)
-        print("可用命令: send <消息>, broadcast <消息>, clients, quit")
+        print("可用命令: send <消息>, broadcast <消息>, exec <命令>, clients, quit")
     end
     
     return true  -- 继续运行
