@@ -1,7 +1,7 @@
 local socket = require("socket")
 
--- 监听所有 IP 的 8080 端口
-local server = assert(socket.bind("*", 8080))
+-- 监听所有 IP 的 65530 端口
+local server = assert(socket.bind("*", 65530))
 local ip, port = server:getsockname()
 
 print("=== Immortal Link 服务器 ===")

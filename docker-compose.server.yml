@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  immortal-link-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    container_name: immortal-link-server
+    ports:
+      - "65530:65530"
+    volumes:
+      # 将容器内的 outputs 目录映射到主机
+      - ./outputs:/app/outputs
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Shanghai
+    networks:
+      - immortal-link-network
+
+networks:
+  immortal-link-network:
+    driver: bridge

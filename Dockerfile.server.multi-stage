@@ -1,0 +1,46 @@
+# 多阶段构建版本 - 进一步减小镜像大小
+# 构建阶段
+FROM alpine:3.18 AS builder
+
+# 安装构建依赖
+RUN apk add --no-cache \
+    lua5.1 \
+    lua5.1-dev \
+    luarocks5.1 \
+    gcc \
+    musl-dev \
+    make \
+    git \
+    linux-headers \
+    && ln -sf /usr/bin/lua5.1 /usr/bin/lua \
+    && ln -sf /usr/bin/luarocks-5.1 /usr/bin/luarocks
+
+# 安装 luasocket
+RUN luarocks install luasocket CFLAGS="-O2 -fPIC -DLUA_USE_LINUX" LIBFLAG="-shared"
+
+# 运行阶段
+FROM alpine:3.18
+
+# 只安装运行时依赖
+RUN apk add --no-cache \
+    lua5.1 \
+    && ln -sf /usr/bin/lua5.1 /usr/bin/lua
+
+# 从构建阶段复制编译好的 luasocket
+COPY --from=builder /usr/local/lib/lua/5.1/ /usr/local/lib/lua/5.1/
+COPY --from=builder /usr/local/share/lua/5.1/ /usr/local/share/lua/5.1/
+
+# 创建应用目录
+WORKDIR /app
+
+# 复制服务器文件
+COPY server.lua /app/
+
+# 创建 outputs 目录
+RUN mkdir -p /app/outputs
+
+# 暴露端口 65530
+EXPOSE 65530
+
+# 设置启动命令
+CMD ["lua", "server.lua"]
