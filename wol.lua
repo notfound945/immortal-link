@@ -2,14 +2,14 @@ local socket = require("socket")
 
 local wol = {}
 
--- 检查MAC地址有效性
+-- Validate MAC address format
 local function is_valid_mac(mac)
     local pattern1 = "^%x%x[:-]%x%x[:-]%x%x[:-]%x%x[:-]%x%x[:-]%x%x$"
     local pattern2 = "^%x%x%x%x%x%x%x%x%x%x%x%x$"
     return mac:match(pattern1) or mac:match(pattern2)
 end
 
--- MAC地址转二进制
+-- Convert MAC address to binary
 local function mac_to_binary(mac)
     local clean_mac = mac:gsub("[:-]", "")
     local binary = ""
@@ -20,17 +20,17 @@ local function mac_to_binary(mac)
     return binary
 end
 
--- 构建魔术包
+-- Build magic packet
 local function build_magic_packet(mac_binary)
     local header = string.rep(string.char(0xFF), 6)
     local body = string.rep(mac_binary, 16)
     return header .. body
 end
 
--- 发送WOL包（修复参数类型）
+-- Send WOL packet
 function wol.send(mac, options)
     if not is_valid_mac(mac) then
-        return false, "无效的MAC地址格式"
+        return false, "Invalid MAC address format"
     end
     
     options = options or {}
@@ -40,34 +40,34 @@ function wol.send(mac, options)
     local mac_binary = mac_to_binary(mac)
     local magic_packet = build_magic_packet(mac_binary)
     
-    -- 创建UDP套接字
+    -- Create UDP socket
     local udp = socket.udp()
     if not udp then
-        return false, "无法创建UDP套接字"
+        return false, "Failed to create UDP socket"
     end
     
-    -- 先绑定到 IPv4，再设置广播（macOS 需要）
+    -- Bind to IPv4 before enabling broadcast (required on macOS)
     local ok_bind, err_bind = udp:setsockname("0.0.0.0", 0)
     if not ok_bind then
         udp:close()
-        return false, "无法绑定本地地址: " .. (err_bind or "")
+        return false, "Failed to bind local address: " .. (err_bind or "")
     end
 
     local ok, err = udp:setoption("broadcast", true)
     if not ok then
         udp:close()
-        return false, "无法设置广播选项: " .. (err or "")
+        return false, "Failed to set broadcast option: " .. (err or "")
     end
     
-    -- 发送魔术包
+    -- Send magic packet
     local bytes_sent, err = udp:sendto(magic_packet, broadcast, port)
     udp:close()
     
     if not bytes_sent then
-        return false, "发送失败: " .. (err or "")
+        return false, "Send failed: " .. (err or "")
     end
     
-    return true, string.format("成功发送魔术包到 %s (端口 %d)", mac, port)
+    return true, string.format("Magic packet sent to %s (port %d)", mac, port)
 end
 
 return wol

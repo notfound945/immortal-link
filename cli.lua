@@ -3,7 +3,7 @@ local socket = require("socket")
 local host = "127.0.0.1"
 local port = 65531
 
--- 支持: lua cli.lua [--port <p>] <command...>
+-- Usage: lua cli.lua [--port <p>] <command...>
 for i = 1, #arg do
     if arg[i] == "--port" and arg[i+1] then
         local p = tonumber(arg[i+1])
@@ -11,7 +11,7 @@ for i = 1, #arg do
     end
 end
 
--- 拼接剩余参数为命令
+-- Join remaining args as the command string
 local parts = {}
 for i = 1, #arg do
     if arg[i] ~= "--port" and tonumber(arg[i]) ~= port then
@@ -20,7 +20,7 @@ for i = 1, #arg do
 end
 
 if #parts == 0 then
-    print("用法: lua cli.lua [--port <p>] <command>")
+    print("Usage: lua cli.lua [--port <p>] <command>")
     os.exit(1)
 end
 

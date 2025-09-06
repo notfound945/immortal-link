@@ -1,14 +1,14 @@
 local socket = require("socket")
 local wol = require("wol")
 
--- 定义默认主机和开发环境主机
+-- Default hosts and environments
 local defaultHost = "127.0.0.1"
 local lsHost = "120.78.82.250"
 local devHost = "192.168.115.129"
 local port = 65530
 
--- 解析命令行参数
-local host = defaultHost  -- 默认使用本地主机
+-- Parse command line arguments
+local host = defaultHost  -- Default to local host
 for i = 1, #arg do
     if arg[i] == "--host" and arg[i+1] then
         if arg[i+1] == "dev" then
@@ -18,27 +18,27 @@ for i = 1, #arg do
         elseif arg[i+1] == "ls" then
             host = lsHost
         else
-            -- 支持直接指定IP地址
+            -- Support direct IP address specification
             host = arg[i+1]
         end
-        break  -- 只处理第一个--host参数
+        break  -- Only process the first --host argument
     end
 end
 
--- 连接配置
+-- Connection configuration
 local maxRetries = 10
-local retryInterval = 2  -- 秒
+local retryInterval = 2  -- seconds
 local tcp = nil
 
--- 连接到服务器的函数
+-- Function to connect to the server
 local function connectToServer()
     local newTcp = socket.tcp()
-    newTcp:settimeout(5)  -- 连接超时时间
+    newTcp:settimeout(5)  -- Connection timeout
     
     local success, err = newTcp:connect(host, port)
     if success then
-        print("已连接到服务器 " .. host .. ":" .. port)
-        newTcp:settimeout(1)  -- 1秒超时
+        print("Connected to server " .. host .. ":" .. port)
+        newTcp:settimeout(1)  -- 1 second timeout
         return newTcp
     else
         newTcp:close()
@@ -46,115 +46,115 @@ local function connectToServer()
     end
 end
 
--- 自动重连函数
+-- Auto-reconnect function
 local function autoReconnect()
     local retryCount = 0
     
     while retryCount < maxRetries do
-        print("尝试重连到服务器... (第 " .. (retryCount + 1) .. "/" .. maxRetries .. " 次)")
+        print("Attempting to reconnect to server... (Attempt " .. (retryCount + 1) .. "/" .. maxRetries .. ")")
         
         local newTcp, err = connectToServer()
         if newTcp then
-            print("重连成功！")
+            print("Reconnected successfully!")
             return newTcp
         else
-            print("重连失败: " .. tostring(err))
+            print("Reconnection failed: " .. tostring(err))
             retryCount = retryCount + 1
             
             if retryCount < maxRetries then
-                print("等待 " .. retryInterval .. " 秒后重试...")
+                print("Waiting " .. retryInterval .. " seconds before retrying...")
                 socket.sleep(retryInterval)
             end
         end
     end
     
-    print("重连失败，已达到最大重试次数 (" .. maxRetries .. ")，程序退出")
+    print("Reconnection failed, maximum retries reached (" .. maxRetries .. "), exiting program")
     return nil
 end
 
--- 初始连接
+-- Initial connection
 tcp, err = connectToServer()
 if not tcp then
-    print("初始连接失败: " .. tostring(err))
+    print("Initial connection failed: " .. tostring(err))
     tcp = autoReconnect()
     if not tcp then
         os.exit(1)
     end
 end
 
-print("等待服务器消息...")
+print("Waiting for server messages...")
 
--- 使用 wol.lua 提供的实现发送 WOL 包
+-- Use the implementation provided by wol.lua to send WOL packets
 local function sendWolPacket(mac)
     local ok, msg = wol.send(mac, { broadcast = "192.168.115.191", port = 9 })
     return ok, msg
 end
 
--- 主循环：接收服务器消息并执行命令，支持自动重连
+-- Main loop: receive server messages and execute commands, with auto-reconnect
 while true do
-    -- 接收服务器消息
+    -- Receive server message
     local response, err = tcp:receive()
     if response then
-        print("[服务器消息] " .. response)
+        print("[Server Message] " .. response)
         
-        -- 如果服务器发送断开消息，则退出
+        -- If server sends disconnect message, exit
         if response:match("再见") or response:match("断开") then
             break
         end
         
-        -- 已移除 CMD 执行请求处理
+        -- CMD execution request handling removed
         
-        -- 检查是否是WOL命令请求
+        -- Check if it's a WOL command request
         local macAddress = response:match("^WOL:(.+)$")
         if macAddress then
-            print("[执行WOL] MAC地址: " .. macAddress)
+            print("[Executing WOL] MAC address: " .. macAddress)
             local success, result = sendWolPacket(macAddress)
             
-            local statusMsg = success and "[WOL成功] " or "[WOL失败] "
+            local statusMsg = success and "[WOL Successful] " or "[WOL Failed] "
             print(statusMsg .. result)
             
-            -- 将结果发送回服务器
+            -- Send result back to server
             local sendSuccess, sendErr = tcp:send("RESULT:" .. result .. "\n")
             if not sendSuccess then
-                print("发送WOL结果失败: " .. tostring(sendErr))
-                print("连接可能已断开，尝试重连...")
+                print("Failed to send WOL result: " .. tostring(sendErr))
+                print("Connection may be broken, attempting to reconnect...")
                 
-                -- 关闭当前连接
+                -- Close current connection
                 tcp:close()
                 
-                -- 尝试重连
+                -- Attempt to reconnect
                 tcp = autoReconnect()
                 if not tcp then
-                    print("重连失败，程序退出")
+                    print("Reconnection failed, exiting program")
                     os.exit(1)
                 end
             else
-                print("[已发送WOL结果到服务器]")
+                print("[WOL result sent to server]")
             end
         end
         
     elseif err and err ~= "timeout" then
-        print("连接错误: " .. tostring(err))
-        print("连接断开，尝试重连...")
+        print("Connection error: " .. tostring(err))
+        print("Connection broken, attempting to reconnect...")
         
-        -- 关闭当前连接
+        -- Close current connection
         tcp:close()
         
-        -- 尝试重连
+        -- Attempt to reconnect
         tcp = autoReconnect()
         if not tcp then
-            print("重连失败，程序退出")
+            print("Reconnection failed, exiting program")
             os.exit(1)
         end
     else
-        -- 超时，继续等待
-        -- print("等待服务器消息...")
+        -- Timeout, continue waiting
+        -- print("Waiting for server messages...")
     end
     
-    -- 短暂休眠
+    -- Short sleep
     socket.sleep(0.1)
 end
 
--- 关闭连接
+-- Close connection
 tcp:close()
-print("已与服务器断开连接")
+print("Disconnected from server")

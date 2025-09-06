@@ -1,14 +1,14 @@
 # Immortal Link
 
-## 介绍
+## Introduction
 
-Immortal Link 是一个用于远程执行命令的工具，支持多客户端连接，支持命令执行结果的保存。
+Immortal Link is a lightweight server/client for remote messaging and WOL broadcasting with multi-client support.
 
-需要注意：
-在**amd64**架构的设备上运行，需要使用**amd64**架构的镜像；同理，在**arm64**架构的设备上运行，也需要使用**arm64**架构的镜像。
+Note:
+Use an image matching your system architecture. For **amd64** hosts use **amd64** images; for **arm64** hosts use **arm64** images.
 
 
-## 编译构建
+## Build
 
 + ARM64
 
@@ -22,27 +22,27 @@ docker build -f Dockerfile.server -t immortal-link:latest .
 docker build -f Dockerfile.server --platform linux/amd64 -t immortal-link:latest .
 ```
 
-## 上传镜像
+## Push image
 
 ```bash
 docker tag immortal-link:latest registry.cn-shenzhen.aliyuncs.com/notfound945/immortal-link:latest
 docker push registry.cn-shenzhen.aliyuncs.com/notfound945/immortal-link:latest
 ```
 
-## 下载镜像
+## Pull image
 
 ```bash
 docker pull registry.cn-shenzhen.aliyuncs.com/notfound945/immortal-link:latest
 docker tag registry.cn-shenzhen.aliyuncs.com/notfound945/immortal-link:latest immortal-link:latest
 ```
 
-## 运行
+## Run
 
 ```bash
 docker run -it --rm -p 65530:65530 --name immortal-link immortal-link:latest
 ```
 
-## 进入容器
+## Enter container
 
 ```bash
 docker exec -it immortal-link /bin/sh
