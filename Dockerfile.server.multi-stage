@@ -36,9 +36,6 @@ WORKDIR /app
 # 复制服务器文件
 COPY server.lua /app/
 
-# 创建 outputs 目录
-RUN mkdir -p /app/outputs
-
 # 暴露端口 65530
 EXPOSE 65530
 

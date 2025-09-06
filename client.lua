@@ -84,27 +84,6 @@ end
 
 print("等待服务器消息...")
 
--- 执行系统命令的函数
-local function executeCommand(cmd)
-    -- 使用 io.popen 执行命令并获取输出
-    local handle = io.popen(cmd)
-    if not handle then
-        return "错误: 无法执行命令"
-    end
-    
-    local result = handle:read("*a")  -- 读取所有输出
-    handle:close()
-    
-    -- 去除结尾的换行符
-    result = result:match("^(.-)%s*$") or result
-    
-    if result == "" then
-        return "命令执行完成，无输出"
-    end
-    
-    return result
-end
-
 -- 使用 wol.lua 提供的实现发送 WOL 包
 local function sendWolPacket(mac)
     local ok, msg = wol.send(mac, { broadcast = "192.168.115.191", port = 9 })
@@ -123,32 +102,7 @@ while true do
             break
         end
         
-        -- 检查是否是命令执行请求
-        local cmd = response:match("^CMD:(.+)$")
-        if cmd then
-            print("[执行命令] " .. cmd)
-            local result = executeCommand(cmd)
-            print("[命令结果] " .. result)
-            
-            -- 将结果发送回服务器
-            local success, sendErr = tcp:send("RESULT:" .. result .. "\n")
-            if not success then
-                print("发送结果失败: " .. tostring(sendErr))
-                print("连接可能已断开，尝试重连...")
-                
-                -- 关闭当前连接
-                tcp:close()
-                
-                -- 尝试重连
-                tcp = autoReconnect()
-                if not tcp then
-                    print("重连失败，程序退出")
-                    os.exit(1)
-                end
-            else
-                print("[已发送结果到服务器]")
-            end
-        end
+        -- 已移除 CMD 执行请求处理
         
         -- 检查是否是WOL命令请求
         local macAddress = response:match("^WOL:(.+)$")

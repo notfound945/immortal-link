@@ -20,8 +20,6 @@ WORKDIR /app
 
 COPY server.lua /app/
 
-RUN mkdir -p /app/outputs
-
 EXPOSE 65530
 
 CMD ["lua", "server.lua"]

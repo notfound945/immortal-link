@@ -22,7 +22,7 @@ print("管理端口: 127.0.0.1:" .. adminPort .. (daemonMode and " (daemon)" or 
 print("输入命令:")
 print("  send <消息>     - 向所有客户端发送消息")
 print("  broadcast <消息> - 广播消息")
-print("  exec <命令>     - 让所有客户端执行系统命令")
+-- 已移除 exec 指令
 print("  wol <MAC地址>   - 发送 WOL 唤醒指令")
 print("  clients         - 显示连接的客户端")
 print("  quit           - 退出服务器")
@@ -82,37 +82,16 @@ local function processNetwork()
                 -- 检查是否是命令执行结果
                 local result = line:match("^RESULT:(.*)$")
                 if result then
-                    -- 生成文件名：客户端ID + 命令名 + 时间
-                    local timestamp = os.date("%Y%m%d_%H%M%S")
-                    local cmdName = "unknown"
-                    local fullCommand = "未知命令"
-                    
-                    -- 尝试获取对应的命令名
-                    if pendingCommands[clientId] then
-                        fullCommand = pendingCommands[clientId]
-                        cmdName = fullCommand:match("^(%S+)") or "unknown"
-                        cmdName = cmdName:gsub("[^%w%-_]", "_")  -- 替换特殊字符
-                        pendingCommands[clientId] = nil  -- 清除已处理的命令
-                    end
-                    
-                    -- 确保 outputs 目录存在
-                    local outputDir = "outputs"
-                    os.execute("mkdir -p " .. outputDir)  -- 创建目录（如果不存在）
-                    
-                    local filename = outputDir .. "/" .. clientId .. "_" .. cmdName .. "_" .. timestamp .. ".txt"
-                    
-                    local file = io.open(filename, "w")
-                    if file then
-                        file:write("客户端ID: " .. clientId .. "\n")
-                        file:write("执行命令: " .. fullCommand .. "\n")
-                        file:write("接收时间: " .. os.date("%Y-%m-%d %H:%M:%S") .. "\n")
-                        file:write("=" .. string.rep("=", 50) .. "\n")
-                        file:write(result)
-                        file:close()
-                        print("收到来自 " .. clientId .. " 的命令执行结果，已保存到文件: " .. filename)
-                    else
-                        print("收到来自 " .. clientId .. " 的命令执行结果，但无法写入文件: " .. filename)
-                    end
+                    -- 直接输出到标准输出（同时回写到管理连接，如果存在）
+                    local timestamp = os.date("%Y-%m-%d %H:%M:%S")
+                    local fullCommand = pendingCommands[clientId] or "未知命令"
+                    pendingCommands[clientId] = nil
+
+                    printBoth("收到来自 " .. clientId .. " 的命令执行结果")
+                    printBoth("执行命令: " .. fullCommand)
+                    printBoth("接收时间: " .. timestamp)
+                    printBoth("=" .. string.rep("=", 50))
+                    printBoth(result)
                 else
                     print("收到来自 " .. clientId .. " 的消息: " .. line)
                 end
@@ -155,20 +134,7 @@ local function processCommand(input)
         end
         printBoth("广播消息已发送给 " .. count .. " 个客户端")
         
-    elseif cmd == "exec" and message ~= "" then
-        local count = 0
-        for clientId, clientInfo in pairs(clients) do
-            if clientInfo.connected then
-                local success = clientInfo.socket:send("CMD:" .. message .. "\n")
-                if success then
-                    count = count + 1
-                    -- 记录发送给该客户端的命令，用于后续文件命名
-                    pendingCommands[clientId] = message
-                end
-            end
-        end
-        printBoth("命令 '" .. message .. "' 已发送给 " .. count .. " 个客户端执行")
-        
+    -- exec 指令已移除
     elseif cmd == "wol" and message ~= "" then
         local count = 0
         for clientId, clientInfo in pairs(clients) do
@@ -208,10 +174,7 @@ local function processCommand(input)
     elseif cmd == "broadcast" and message == "" then
         printBoth("用法: broadcast <消息>")
         
-    elseif cmd == "exec" and message == "" then
-        printBoth("用法: exec <命令>")
-        printBoth("示例: exec pwd")
-        
+    -- exec 用法说明已移除
     elseif cmd == "wol" and message == "" then
         printBoth("用法: wol <MAC地址>")
         printBoth("示例: wol 00:11:22:33:44:55")
@@ -219,7 +182,7 @@ local function processCommand(input)
         
     else
         printBoth("未知命令: " .. input)
-        printBoth("可用命令: send <消息>, broadcast <消息>, exec <命令>, wol <MAC地址>, clients, quit")
+        printBoth("可用命令: send <消息>, broadcast <消息>, wol <MAC地址>, clients, quit")
     end
     
     return true  -- 继续运行

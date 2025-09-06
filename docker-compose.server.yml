@@ -8,9 +8,6 @@ services:
     container_name: immortal-link-server
     ports:
       - "65530:65530"
-    volumes:
-      # 将容器内的 outputs 目录映射到主机
-      - ./outputs:/app/outputs
     stdin_open: true
     tty: true
     restart: unless-stopped
