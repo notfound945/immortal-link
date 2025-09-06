@@ -47,3 +47,13 @@ docker run -it --rm -p 65530:65530 --name immortal-link immortal-link:latest
 ```bash
 docker exec -it immortal-link /bin/sh
 ```
+
+## CLI usage
+
+```bash
+docker exec -it immortal-link lua cli.lua send hello
+docker exec -it immortal-link lua cli.lua wol 6c:1f:f7:75:c7:0e
+docker exec -it immortal-link lua cli.lua broadcast hello
+docker exec -it immortal-link lua cli.lua clients
+docker exec -it immortal-link lua cli.lua quit
+```
