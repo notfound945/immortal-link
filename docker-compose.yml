@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  immortal-link:
+    image: immortal-link:latest
+    container_name: immortal-link
+    command: ["lua", "server.lua", "--daemon"]
+    ports:
+      - "65530:65530"
+    stdin_open: true
+    tty: true
+    restart: unless-stopped

@@ -34,7 +34,7 @@ COPY --from=builder /usr/local/share/lua/5.1/ /usr/local/share/lua/5.1/
 WORKDIR /app
 
 # 复制服务器文件
-COPY server.lua /app/
+COPY server.lua cli.lua /app/
 
 # 暴露端口 65530
 EXPOSE 65530
