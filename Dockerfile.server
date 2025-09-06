@@ -24,4 +24,5 @@ RUN mkdir -p /app/outputs
 
 EXPOSE 65530
 
-CMD ["/bin/sh"]
+CMD ["lua", "server.lua"]
+# CMD ["/bin/sh"]

@@ -1,11 +1,24 @@
 local socket = require("socket")
 
+-- 简单参数解析：支持 --daemon 与 --admin-port <port>
+local daemonMode = false
+local adminPort = 65531
+for i = 1, #arg do
+    if arg[i] == "--daemon" then
+        daemonMode = true
+    elseif arg[i] == "--admin-port" and arg[i+1] then
+        local p = tonumber(arg[i+1])
+        if p then adminPort = p end
+    end
+end
+
 -- 监听所有 IP 的 65530 端口
 local server = assert(socket.bind("*", 65530))
 local ip, port = server:getsockname()
 
 print("=== Immortal Link 服务器 ===")
 print("监听地址: " .. ip .. ":" .. port)
+print("管理端口: 127.0.0.1:" .. adminPort .. (daemonMode and " (daemon)" or ""))
 print("输入命令:")
 print("  send <消息>     - 向所有客户端发送消息")
 print("  broadcast <消息> - 广播消息")
@@ -13,7 +26,7 @@ print("  exec <命令>     - 让所有客户端执行系统命令")
 print("  wol <MAC地址>   - 发送 WOL 唤醒指令")
 print("  clients         - 显示连接的客户端")
 print("  quit           - 退出服务器")
-print("输入多行命令后按 Ctrl+D (EOF) 执行")
+print("输入多行命令后按 Ctrl+D (EOF) 执行；或通过 cli 连接管理端口发送命令")
 print("==============================")
 
 -- 存储连接的客户端
@@ -21,6 +34,22 @@ local clients = {}
 local clientCounter = 0
 -- 存储发送给客户端的命令，用于生成有意义的文件名
 local pendingCommands = {}
+
+-- 管理端口：本地回环监听
+local adminServer = assert(socket.bind("127.0.0.1", adminPort))
+adminServer:settimeout(0)
+local adminClients = {}
+local adminClientCounter = 0
+
+-- 当前命令的应答器（仅用于管理端口会话）
+local currentResponder = nil
+local function printBoth(msg)
+    print(msg)
+    if currentResponder then
+        -- 确保以换行结尾
+        currentResponder(msg .. "\n")
+    end
+end
 
 -- 设置服务器为非阻塞模式
 server:settimeout(0)
@@ -112,7 +141,7 @@ local function processCommand(input)
                 end
             end
         end
-        print("消息已发送给 " .. count .. " 个客户端")
+        printBoth("消息已发送给 " .. count .. " 个客户端")
         
     elseif cmd == "broadcast" and message ~= "" then
         local count = 0
@@ -124,7 +153,7 @@ local function processCommand(input)
                 end
             end
         end
-        print("广播消息已发送给 " .. count .. " 个客户端")
+        printBoth("广播消息已发送给 " .. count .. " 个客户端")
         
     elseif cmd == "exec" and message ~= "" then
         local count = 0
@@ -138,7 +167,7 @@ local function processCommand(input)
                 end
             end
         end
-        print("命令 '" .. message .. "' 已发送给 " .. count .. " 个客户端执行")
+        printBoth("命令 '" .. message .. "' 已发送给 " .. count .. " 个客户端执行")
         
     elseif cmd == "wol" and message ~= "" then
         local count = 0
@@ -152,17 +181,17 @@ local function processCommand(input)
                 end
             end
         end
-        print("WOL命令 (MAC: " .. message .. ") 已发送给 " .. count .. " 个客户端")
+        printBoth("WOL命令 (MAC: " .. message .. ") 已发送给 " .. count .. " 个客户端")
         
     elseif cmd == "clients" then
         local count = 0
         for clientId, clientInfo in pairs(clients) do
             if clientInfo.connected then
-                print("  " .. clientId)
+                printBoth("  " .. clientId)
                 count = count + 1
             end
         end
-        print("总共 " .. count .. " 个客户端在线")
+        printBoth("总共 " .. count .. " 个客户端在线")
         
     elseif cmd == "quit" then
         for clientId, clientInfo in pairs(clients) do
@@ -174,63 +203,106 @@ local function processCommand(input)
         return false  -- 退出
         
     elseif cmd == "send" and message == "" then
-        print("用法: send <消息>")
+        printBoth("用法: send <消息>")
         
     elseif cmd == "broadcast" and message == "" then
-        print("用法: broadcast <消息>")
+        printBoth("用法: broadcast <消息>")
         
     elseif cmd == "exec" and message == "" then
-        print("用法: exec <命令>")
-        print("示例: exec pwd")
+        printBoth("用法: exec <命令>")
+        printBoth("示例: exec pwd")
         
     elseif cmd == "wol" and message == "" then
-        print("用法: wol <MAC地址>")
-        print("示例: wol 00:11:22:33:44:55")
-        print("示例: wol 00-11-22-33-44-55")
+        printBoth("用法: wol <MAC地址>")
+        printBoth("示例: wol 00:11:22:33:44:55")
+        printBoth("示例: wol 00-11-22-33-44-55")
         
     else
-        print("未知命令: " .. input)
-        print("可用命令: send <消息>, broadcast <消息>, exec <命令>, wol <MAC地址>, clients, quit")
+        printBoth("未知命令: " .. input)
+        printBoth("可用命令: send <消息>, broadcast <消息>, exec <命令>, wol <MAC地址>, clients, quit")
     end
     
     return true  -- 继续运行
 end
 
 -- 主循环：等待完整输入
-while true do
-    -- 持续处理网络事件
-    processNetwork()
-    
-    print("\n请输入命令 (多行输入后按 Ctrl+D 执行):")
-    io.write("server> ")
-    io.flush()
-    
-    -- 读取所有输入直到EOF
-    local commands = {}
+if daemonMode then
+    -- 守护模式：仅处理网络与管理端口，不读取stdin
     while true do
-        local line = io.read()
-        if not line then  -- EOF
-            break
+        processNetwork()
+        -- 管理端口：接受并处理命令
+        local adminClient = adminServer:accept()
+        if adminClient then
+            adminClientCounter = adminClientCounter + 1
+            local aid = "admin-" .. adminClientCounter
+            adminClients[aid] = { socket = adminClient, id = aid }
+            adminClient:settimeout(0)
+            print("管理客户端连接: " .. aid)
         end
-        -- 简单的去除首尾空白字符（Lua 5.1兼容）
-        line = line:match("^%s*(.-)%s*$")
-        if line ~= "" then
-            table.insert(commands, line)
+        for aid, ainfo in pairs(adminClients) do
+            local line, err = ainfo.socket:receive()
+            if line then
+                -- 处理管理命令并回显
+                currentResponder = function(msg)
+                    ainfo.socket:send(msg)
+                end
+                local keepRunning = processCommand(line)
+                currentResponder = nil
+                if not keepRunning then
+                    -- 关闭资源并退出
+                    for _, c in pairs(clients) do
+                        if c.connected then c.socket:close() end
+                    end
+                    ainfo.socket:send("服务器已关闭\n")
+                    ainfo.socket:close()
+                    adminClients[aid] = nil
+                    server:close()
+                    return
+                end
+            elseif err and err ~= "timeout" then
+                print("管理客户端断开: " .. aid)
+                ainfo.socket:close()
+                adminClients[aid] = nil
+            end
         end
+        socket.sleep(0.1)
     end
-    
-    -- 处理所有命令
-    local shouldContinue = true
-    for _, cmd in ipairs(commands) do
-        print("执行命令: " .. cmd)
-        shouldContinue = processCommand(cmd)
+else
+    while true do
+        -- 持续处理网络事件
+        processNetwork()
+        
+        print("\n请输入命令 (多行输入后按 Ctrl+D 执行):")
+        io.write("server> ")
+        io.flush()
+        
+        -- 读取所有输入直到EOF
+        local commands = {}
+        while true do
+            local line = io.read()
+            if not line then  -- EOF
+                break
+            end
+            -- 简单的去除首尾空白字符（Lua 5.1兼容）
+            line = line:match("^%s*(.-)%s*$")
+            if line ~= "" then
+                table.insert(commands, line)
+            end
+        end
+        
+        -- 处理所有命令
+        local shouldContinue = true
+        for _, cmd in ipairs(commands) do
+            print("执行命令: " .. cmd)
+            shouldContinue = processCommand(cmd)
+            if not shouldContinue then
+                break
+            end
+        end
+        
         if not shouldContinue then
             break
         end
-    end
-    
-    if not shouldContinue then
-        break
     end
 end
 
