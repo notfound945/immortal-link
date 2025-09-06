@@ -32,5 +32,5 @@ RUN mkdir -p /app/outputs
 # 暴露端口 65530
 EXPOSE 65530
 
-# 设置启动命令
-CMD ["lua", "server.lua"]
+# 设置默认命令为 shell，方便交互式使用
+CMD ["/bin/sh"]

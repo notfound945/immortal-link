@@ -3,7 +3,7 @@ local socket = require("socket")
 -- 定义默认主机和开发环境主机
 local defaultHost = "127.0.0.1"
 local devHost = "192.168.115.129"
-local port = 65530
+local port = 8080
 
 -- 解析命令行参数
 local host = defaultHost  -- 默认使用本地主机
