@@ -1,6 +1,6 @@
 # 多阶段构建版本 - 进一步减小镜像大小
 # 构建阶段
-FROM alpine:3.18 AS builder
+FROM alpine:latest AS builder
 
 # 安装构建依赖
 RUN apk add --no-cache \
@@ -19,7 +19,7 @@ RUN apk add --no-cache \
 RUN luarocks install luasocket CFLAGS="-O2 -fPIC -DLUA_USE_LINUX" LIBFLAG="-shared"
 
 # 运行阶段
-FROM alpine:3.18
+FROM alpine:latest
 
 # 只安装运行时依赖
 RUN apk add --no-cache \

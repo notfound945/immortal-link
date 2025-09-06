@@ -1,12 +1,9 @@
-# Lua 5.1.5 基础镜像
 FROM alpine:latest
 
-# 设置维护者信息
 LABEL maintainer="hailinpan"
 LABEL description="Lua 5.1.5 base image with common libraries"
 LABEL version="1.0"
 
-# 安装 Lua 5.1.5 和开发工具
 RUN apk add --no-cache \
     lua5.1 \
     lua5.1-dev \
@@ -17,31 +14,24 @@ RUN apk add --no-cache \
     linux-headers \
     curl \
     ca-certificates \
-    # 创建符号链接，方便使用
     && ln -sf /usr/bin/lua5.1 /usr/bin/lua \
     && ln -sf /usr/bin/luarocks-5.1 /usr/bin/luarocks
 
-# 安装常用的 Lua 库
 RUN luarocks install luasocket CFLAGS="-O2 -fPIC -DLUA_USE_LINUX" LIBFLAG="-shared" \
     && luarocks install luafilesystem \
     && luarocks install lua-cjson \
     && luarocks install lpeg
 
-# 清理编译依赖（保持镜像轻量）
 RUN apk del gcc musl-dev make linux-headers
 
-# 设置环境变量
 ENV LUA_VERSION=5.1.5
 ENV LUA_PATH="/usr/local/share/lua/5.1/?.lua;/usr/local/share/lua/5.1/?/init.lua;/usr/share/lua/5.1/?.lua;/usr/share/lua/5.1/?/init.lua;./?.lua"
 ENV LUA_CPATH="/usr/local/lib/lua/5.1/?.so;/usr/lib/lua/5.1/?.so;./?.so"
 
-# 创建工作目录
 WORKDIR /app
 
-# 验证安装
 RUN lua -v \
     && luarocks --version \
-    && lua -e "print('Lua 5.1.5 基础镜像构建成功!')"
+    && lua -e "print('Lua 5.1.5 base image build success!')"
 
-# 默认命令（作为基础镜像，通常会被覆盖）
 CMD ["lua", "-v"]

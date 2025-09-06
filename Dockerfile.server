@@ -1,5 +1,5 @@
 # 使用 Alpine Linux 作为基础镜像（更轻量化）
-FROM alpine:3.18
+FROM alpine:latest
 
 # 安装 Lua 5.1、开发工具和依赖
 RUN apk add --no-cache \
