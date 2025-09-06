@@ -149,30 +149,88 @@ local function createWolPacket(mac)
     return packet, cleanMac
 end
 
--- 发送WOL包的函数
+-- 发送WOL包的函数（纯UDP原始方式）
 local function sendWolPacket(mac)
     local packet, cleanMacOrError = createWolPacket(mac)
     if not packet then
         return false, "MAC地址验证失败: " .. cleanMacOrError
     end
     
-    -- 创建UDP socket
-    local udp = socket.udp()
-    if not udp then
-        return false, "无法创建UDP socket"
+    -- 直接使用指定的网络广播地址
+    local attempts = {
+        -- 优先使用当前网络的广播地址 (192.168.115.191/26)
+        {"192.168.115.191", 9, "当前网段广播(/26)"},
+        -- 标准全局广播地址（需要root权限）
+        {"255.255.255.255", 9, "全局广播"},
+        -- 多端口尝试
+        {"192.168.115.191", 7, "当前网段广播(端口7)"},
+        {"255.255.255.255", 7, "全局广播(端口7)"}
+    }
+    
+    local lastError = "未知错误"
+    local successCount = 0
+    
+    print("开始发送WOL包，MAC地址: " .. cleanMacOrError)
+    print("包长度: " .. #packet .. " 字节")
+    print("目标网络: 192.168.115.0/26")
+    
+    for i, attempt in ipairs(attempts) do
+        local targetIp, targetPort, description = attempt[1], attempt[2], attempt[3]
+        local attemptSuccess = false
+        
+        -- 创建新的UDP socket
+        local udp = socket.udp()
+        if udp then
+            -- 先绑定到 IPv4，再设置广播（macOS 需要）
+            local bindOk, bindErr = udp:setsockname("0.0.0.0", 0)
+            if not bindOk then
+                lastError = "无法绑定本地地址: " .. tostring(bindErr)
+                print("尝试 " .. i .. " (" .. description .. "): 失败 - " .. lastError)
+                udp:close()
+                goto continue_attempt
+            end
+
+            -- 设置socket选项
+            local broadcastSet = udp:setoption("broadcast", true)
+            local reuseSet = udp:setoption("reuseaddr", true)
+            
+            -- 如果是广播地址，检查是否设置成功
+            if not targetIp:match("255$") or broadcastSet then
+                -- 尝试发送
+                local success, err = udp:sendto(packet, targetIp, targetPort)
+                
+                if success then
+                    successCount = successCount + 1
+                    print("尝试 " .. i .. " (" .. description .. "): 成功发送到 " .. targetIp .. ":" .. targetPort)
+                    attemptSuccess = true
+                else
+                    lastError = tostring(err)
+                    print("尝试 " .. i .. " (" .. description .. "): 失败 - " .. lastError)
+                end
+            else
+                print("尝试 " .. i .. " (" .. description .. "): 设置广播选项失败")
+            end
+            
+            udp:close()
+            ::continue_attempt::
+        else
+            lastError = "无法创建UDP socket"
+            print("尝试 " .. i .. " 失败: " .. lastError)
+        end
     end
     
-    -- 设置广播选项
-    udp:setoption("broadcast", true)
-    
-    -- 发送到广播地址的端口9 (WOL标准端口)
-    local success, err = udp:sendto(packet, "255.255.255.255", 9)
-    udp:close()
-    
-    if success then
-        return true, "WOL包已发送到MAC地址: " .. cleanMacOrError .. " (长度: " .. #packet .. " 字节)"
+    if successCount > 0 then
+        return true, "WOL包发送完成! 成功发送 " .. successCount .. " 次，MAC地址: " .. cleanMacOrError .. 
+                    "\n注意: 如果目标设备未唤醒，可能需要:\n" ..
+                    "1. 确保目标设备的WOL功能已启用\n" ..
+                    "2. 检查网络设备(路由器/交换机)是否支持WOL转发\n" ..
+                    "3. 确保客户端与目标设备在同一网段"
     else
-        return false, "发送WOL包失败: " .. tostring(err)
+        return false, "所有WOL发送尝试都失败，最后错误: " .. lastError .. 
+                     "\n解决方案:\n" ..
+                     "1. 使用root权限运行: sudo lua client.lua\n" ..
+                     "2. 检查防火墙是否阻止UDP端口9的出站连接\n" ..
+                     "3. 确认网络接口配置正确"
     end
 end
 
@@ -269,4 +327,3 @@ end
 -- 关闭连接
 tcp:close()
 print("已与服务器断开连接")
-    
