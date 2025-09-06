@@ -2,8 +2,9 @@ local socket = require("socket")
 
 -- 定义默认主机和开发环境主机
 local defaultHost = "127.0.0.1"
+local lsHost = "120.78.82.250"
 local devHost = "192.168.115.129"
-local port = 8080
+local port = 65530
 
 -- 解析命令行参数
 local host = defaultHost  -- 默认使用本地主机
@@ -13,6 +14,8 @@ for i = 1, #arg do
             host = devHost
         elseif arg[i+1] == "local" then
             host = defaultHost
+        elseif arg[i+1] == "ls" then
+            host = lsHost
         else
             -- 支持直接指定IP地址
             host = arg[i+1]
