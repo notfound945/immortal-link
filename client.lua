@@ -104,6 +104,78 @@ local function executeCommand(cmd)
     return result
 end
 
+-- MAC地址验证函数
+local function validateMacAddress(mac)
+    if not mac or type(mac) ~= "string" then
+        return false, "MAC地址不能为空"
+    end
+    
+    -- 移除所有分隔符并转换为大写
+    local cleanMac = mac:upper():gsub("[:%-%s]", "")
+    
+    -- 检查长度是否为12个字符
+    if #cleanMac ~= 12 then
+        return false, "MAC地址长度错误，应为12个十六进制字符"
+    end
+    
+    -- 检查是否都是十六进制字符
+    if not cleanMac:match("^[0-9A-F]+$") then
+        return false, "MAC地址包含非十六进制字符"
+    end
+    
+    return true, cleanMac
+end
+
+-- 构造WOL魔术包的函数
+local function createWolPacket(mac)
+    local isValid, cleanMac = validateMacAddress(mac)
+    if not isValid then
+        return nil, cleanMac  -- cleanMac这里是错误信息
+    end
+    
+    -- 将MAC地址转换为字节数组
+    local macBytes = {}
+    for i = 1, 12, 2 do
+        local byte = tonumber(cleanMac:sub(i, i+1), 16)
+        table.insert(macBytes, string.char(byte))
+    end
+    
+    local macString = table.concat(macBytes)
+    
+    -- 构造魔术包: 6个0xFF + 16次重复MAC地址
+    local packet = string.rep(string.char(0xFF), 6)  -- 6个0xFF
+    packet = packet .. string.rep(macString, 16)     -- 16次重复MAC地址
+    
+    return packet, cleanMac
+end
+
+-- 发送WOL包的函数
+local function sendWolPacket(mac)
+    local packet, cleanMacOrError = createWolPacket(mac)
+    if not packet then
+        return false, "MAC地址验证失败: " .. cleanMacOrError
+    end
+    
+    -- 创建UDP socket
+    local udp = socket.udp()
+    if not udp then
+        return false, "无法创建UDP socket"
+    end
+    
+    -- 设置广播选项
+    udp:setoption("broadcast", true)
+    
+    -- 发送到广播地址的端口9 (WOL标准端口)
+    local success, err = udp:sendto(packet, "255.255.255.255", 9)
+    udp:close()
+    
+    if success then
+        return true, "WOL包已发送到MAC地址: " .. cleanMacOrError .. " (长度: " .. #packet .. " 字节)"
+    else
+        return false, "发送WOL包失败: " .. tostring(err)
+    end
+end
+
 -- 主循环：接收服务器消息并执行命令，支持自动重连
 while true do
     -- 接收服务器消息
@@ -140,6 +212,35 @@ while true do
                 end
             else
                 print("[已发送结果到服务器]")
+            end
+        end
+        
+        -- 检查是否是WOL命令请求
+        local macAddress = response:match("^WOL:(.+)$")
+        if macAddress then
+            print("[执行WOL] MAC地址: " .. macAddress)
+            local success, result = sendWolPacket(macAddress)
+            
+            local statusMsg = success and "[WOL成功] " or "[WOL失败] "
+            print(statusMsg .. result)
+            
+            -- 将结果发送回服务器
+            local sendSuccess, sendErr = tcp:send("RESULT:" .. result .. "\n")
+            if not sendSuccess then
+                print("发送WOL结果失败: " .. tostring(sendErr))
+                print("连接可能已断开，尝试重连...")
+                
+                -- 关闭当前连接
+                tcp:close()
+                
+                -- 尝试重连
+                tcp = autoReconnect()
+                if not tcp then
+                    print("重连失败，程序退出")
+                    os.exit(1)
+                end
+            else
+                print("[已发送WOL结果到服务器]")
             end
         end
         

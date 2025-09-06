@@ -10,6 +10,7 @@ print("输入命令:")
 print("  send <消息>     - 向所有客户端发送消息")
 print("  broadcast <消息> - 广播消息")
 print("  exec <命令>     - 让所有客户端执行系统命令")
+print("  wol <MAC地址>   - 发送 WOL 唤醒指令")
 print("  clients         - 显示连接的客户端")
 print("  quit           - 退出服务器")
 print("输入多行命令后按 Ctrl+D (EOF) 执行")
@@ -139,6 +140,20 @@ local function processCommand(input)
         end
         print("命令 '" .. message .. "' 已发送给 " .. count .. " 个客户端执行")
         
+    elseif cmd == "wol" and message ~= "" then
+        local count = 0
+        for clientId, clientInfo in pairs(clients) do
+            if clientInfo.connected then
+                local success = clientInfo.socket:send("WOL:" .. message .. "\n")
+                if success then
+                    count = count + 1
+                    -- 记录发送给该客户端的命令，用于后续文件命名
+                    pendingCommands[clientId] = "wol " .. message
+                end
+            end
+        end
+        print("WOL命令 (MAC: " .. message .. ") 已发送给 " .. count .. " 个客户端")
+        
     elseif cmd == "clients" then
         local count = 0
         for clientId, clientInfo in pairs(clients) do
@@ -168,9 +183,14 @@ local function processCommand(input)
         print("用法: exec <命令>")
         print("示例: exec pwd")
         
+    elseif cmd == "wol" and message == "" then
+        print("用法: wol <MAC地址>")
+        print("示例: wol 00:11:22:33:44:55")
+        print("示例: wol 00-11-22-33-44-55")
+        
     else
         print("未知命令: " .. input)
-        print("可用命令: send <消息>, broadcast <消息>, exec <命令>, clients, quit")
+        print("可用命令: send <消息>, broadcast <消息>, exec <命令>, wol <MAC地址>, clients, quit")
     end
     
     return true  -- 继续运行
