@@ -1,5 +1,5 @@
 local socket = require("socket")
-local wol = require("wol")
+local wol = require("client.wol")
 
 -- Default hosts and environments
 local defaultHost = "127.0.0.1"

@@ -18,7 +18,7 @@ RUN apk del gcc musl-dev make git linux-headers
 
 WORKDIR /app
 
-COPY server.lua cli.lua /app/
+COPY server/server.lua server/cli.lua /app/
 
 EXPOSE 65530
 

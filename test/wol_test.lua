@@ -1,4 +1,4 @@
-local wol = require("wol")
+local wol = require("server.wol")
 
 -- Test: valid MAC
 local function test_valid_mac()

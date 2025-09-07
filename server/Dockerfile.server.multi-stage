@@ -34,7 +34,7 @@ COPY --from=builder /usr/local/share/lua/5.1/ /usr/local/share/lua/5.1/
 WORKDIR /app
 
 # Copy server files
-COPY server.lua cli.lua /app/
+COPY server/server.lua server/cli.lua /app/
 
 # Expose port 65530
 EXPOSE 65530

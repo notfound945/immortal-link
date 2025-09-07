@@ -13,13 +13,13 @@ Use an image matching your system architecture. For **amd64** hosts use **amd64*
 + ARM64
 
 ```bash
-docker build -f Dockerfile.server -t immortal-link:latest .
+docker build -f server/Dockerfile.server -t immortal-link:latest .
 ```
 
 + AMD64
 
 ```bash 
-docker build -f Dockerfile.server --platform linux/amd64 -t immortal-link:latest .
+docker build -f server/Dockerfile.server --platform linux/amd64 -t immortal-link:latest .
 ```
 
 ## Push image
