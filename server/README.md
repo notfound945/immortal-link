@@ -107,6 +107,12 @@ sudo docker logs immortal-link
 cd ~/lua-docker/ && sudo make  && cd ~
 ```
 
+### 启动容器
+
+```bash
+cd ~/lua-docker/ && sudo docker compose up -d && cd ~
+```
+
 ### 重启容器
 
 ```bash
