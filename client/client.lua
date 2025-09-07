@@ -1,6 +1,16 @@
 local socket = require("socket")
 local wol = require("wol")
 
+-- Simple file append logger for commands and execution status
+local function appendLog(message)
+    local f = io.open("client_commands.log", "a")
+    if f then
+        local ts = os.date("%Y-%m-%d %H:%M:%S")
+        f:write("[" .. ts .. "] " .. tostring(message) .. "\n")
+        f:close()
+    end
+end
+
 -- Default hosts and environments
 local defaultHost = "127.0.0.1"
 local lsHost = "120.78.82.250"
@@ -128,6 +138,7 @@ while true do
         else
         -- If server sends disconnect message, exit
         if response:match("Bye") or response:match("closed") then
+            appendLog("RECV CLOSE " .. response)
             break
         end
         
@@ -137,15 +148,18 @@ while true do
         local macAddress = response:match("^WOL:(.+)$")
         if macAddress then
             print("[Executing WOL] MAC address: " .. macAddress)
+            appendLog("RECV WOL " .. macAddress)
             local success, result = sendWolPacket(macAddress)
             
             local statusMsg = success and "[WOL Successful] " or "[WOL Failed] "
             print(statusMsg .. result)
+            appendLog("EXEC WOL " .. macAddress .. " -> " .. (success and "OK" or "FAIL") .. ": " .. tostring(result))
             
             -- Send result back to server
             local sendSuccess, sendErr = tcp:send("RESULT:" .. result .. "\n")
             if not sendSuccess then
                 print("Failed to send WOL result: " .. tostring(sendErr))
+                appendLog("SEND RESULT FAIL - " .. tostring(sendErr))
                 print("Connection may be broken, attempting to reconnect...")
                 
                 -- Close current connection
@@ -159,7 +173,11 @@ while true do
                 end
             else
                 print("[WOL result sent to server]")
+                appendLog("SEND RESULT OK")
             end
+        end
+        if not macAddress then
+            appendLog("RECV MSG " .. response)
         end
         end
     elseif err and err ~= "timeout" then
