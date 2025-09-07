@@ -17,6 +17,26 @@ end
 
 local authRequired = (authToken ~= nil and authToken ~= "")
 
+-- Protocol message "enum" for AUTH states
+local Message = {
+    PING = "PING",
+    PONG = "PONG",
+    AUTH_REQUIRED = "AUTH REQUIRED",
+    AUTH_OK = "AUTH OK",
+    AUTH_FAILED = "AUTH FAILED",
+    AUTH_DISABLED = "AUTH DISABLED",
+    SERVER_SHUTDOWN = "SERVER CLOSED",
+}
+
+-- Admin CLI command "enum"
+local Command = {
+    SEND = "send",
+    BROADCAST = "broadcast",
+    WOL = "wol",
+    CLIENTS = "clients",
+    QUIT = "quit",
+}
+
 -- Heartbeat configuration (seconds)
 local heartbeatInterval = 10
 local heartbeatTimeout = 30
@@ -116,7 +136,7 @@ local function processNetwork()
 
         -- Send welcome message
         client:send("Welcome! Your ID is: " .. clientId .. "\n")
-        if authRequired then client:send("AUTH REQUIRED\n") end
+        if authRequired then client:send(Message.AUTH_REQUIRED .. "\n") end
     end
 
     -- Handle existing clients
@@ -133,19 +153,19 @@ local function processNetwork()
                             if provided == authToken then
                                 clientInfo.authenticated = true
                                 clientInfo.lastSeen = socket.gettime()
-                                client:send("AUTH OK\n")
+                                client:send(Message.AUTH_OK .. "\n")
                             else
-                                client:send("AUTH FAILED\n")
+                                client:send(Message.AUTH_FAILED .. "\n")
                                 client:close()
                                 clients[clientId] = nil
                             end
                         else
                             clientInfo.authenticated = true
                             clientInfo.lastSeen = socket.gettime()
-                            client:send("AUTH DISABLED\n")
+                            client:send(Message.AUTH_DISABLED .. "\n")
                         end
                     else
-                        client:send("AUTH REQUIRED\n")
+                        client:send(Message.AUTH_REQUIRED .. "\n")
                         client:close()
                         clients[clientId] = nil
                     end
@@ -154,9 +174,9 @@ local function processNetwork()
                     clientInfo.lastSeen = socket.gettime()
 
                     -- Heartbeat handling
-                    if line == "PING" then
-                        client:send("PONG\n")
-                    elseif line == "PONG" then
+                    if line == Message.PING then
+                        client:send(Message.PONG .. "\n")
+                    elseif line == Message.PONG then
                         -- nothing else to do; lastSeen already updated
                     else
                         -- Check if it is a command result
@@ -191,7 +211,7 @@ local function processNetwork()
             if clients[clientId] and clientInfo.authenticated then
                 local now = socket.gettime()
                 if now - (clientInfo.lastPing or 0) >= heartbeatInterval then
-                    local ok, sendErr = client:send("PING\n")
+                    local ok, sendErr = client:send(Message.PING .. "\n")
                     if ok then
                         clientInfo.lastPing = now
                     else
@@ -220,7 +240,7 @@ local function processCommand(input)
     cmd = cmd or input
     message = message or ""
 
-    if cmd == "send" then
+    if cmd == Command.SEND then
         -- Expect: send <clientId[,clientId2,...]> <message>
         local targetsStr, payload = message:match("^(%S+)%s+(.+)$")
         if not targetsStr or not payload or targetsStr == "" or payload == "" then
@@ -242,7 +262,7 @@ local function processCommand(input)
             printBoth("Not found/offline: " .. table.concat(missing, ", "))
         end
 
-    elseif cmd == "broadcast" and message ~= "" then
+    elseif cmd == Command.BROADCAST and message ~= "" then
         local count = 0
         for clientId, clientInfo in pairs(clients) do
             if clientInfo.connected then
@@ -254,7 +274,7 @@ local function processCommand(input)
         printBoth("Broadcast sent to " .. count .. " clients")
 
         -- exec removed
-    elseif cmd == "wol" then
+    elseif cmd == Command.WOL then
         -- Expect: wol <clientId[,clientId2,...]> <MAC>
         local targetsStr, mac = message:match("^(%S+)%s+(.+)$")
         if not targetsStr or not mac or targetsStr == "" or mac == "" then
@@ -269,7 +289,7 @@ local function processCommand(input)
             if id ~= "" then table.insert(targets, id) end
         end
 
-        local onSent = function(id) pendingCommands[id] = "wol " .. mac end
+        local onSent = function(id) pendingCommands[id] = Command.WOL .. " " .. mac end
         local sent, missing = sendLineToTargets(targets, "WOL:" .. mac, onSent)
         printBoth("WOL command (MAC: " .. mac .. ") sent to " .. sent ..
                       " clients")
@@ -277,23 +297,23 @@ local function processCommand(input)
             printBoth("Not found/offline: " .. table.concat(missing, ", "))
         end
 
-    elseif cmd == "clients" then
+    elseif cmd == Command.CLIENTS then
         printOnlineClientsList()
 
-    elseif cmd == "quit" then
+    elseif cmd == Command.QUIT then
         for clientId, clientInfo in pairs(clients) do
             if clientInfo.connected then
-                clientInfo.socket:send("Server is shutting down. Bye!\n")
+                clientInfo.socket:send(Message.SERVER_SHUTDOWN .. "\n")
                 clientInfo.socket:close()
             end
         end
         return false -- 退出
 
-    elseif cmd == "broadcast" and message == "" then
+    elseif cmd == Command.BROADCAST and message == "" then
         printBoth("Usage: broadcast <message>")
 
         -- exec usage removed
-    elseif cmd == "wol" and message == "" then
+    elseif cmd == Command.WOL and message == "" then
         printBoth("Usage: wol <clientId[,clientId2,...]> <MAC>")
         printBoth("Example: wol client-1 00:11:22:33:44:55")
         printBoth("Example: wol client-1,client-2 00-11-22-33-44-55")
@@ -337,7 +357,7 @@ if daemonMode then
                             c.socket:close()
                         end
                     end
-                    ainfo.socket:send("Server closed\n")
+                    ainfo.socket:send(Message.SERVER_SHUTDOWN .. "\n")
                     ainfo.socket:close()
                     adminClients[aid] = nil
                     server:close()
