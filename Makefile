@@ -46,28 +46,6 @@ run:
 exec:
 	docker exec -it $(CONTAINER) /bin/sh
 
-cli:
-	@if [ -z "$(CMD)" ]; then echo "Usage: make cli CMD='send <client> <message>|broadcast <message>|wol <client> <mac>|clients|quit'"; exit 1; fi
-	docker exec -it $(CONTAINER) lua cli.lua $(CMD)
-
-cli-send:
-	@if [ -z "$(CLIENT)" ] || [ -z "$(MESSAGE)" ]; then echo "Usage: make cli-send CLIENT=<client-id> MESSAGE=<text>"; exit 1; fi
-	docker exec -it $(CONTAINER) lua cli.lua send $(CLIENT) $(MESSAGE)
-
-cli-wol:
-	@if [ -z "$(CLIENT)" ] || [ -z "$(MAC)" ]; then echo "Usage: make cli-wol CLIENT=<client-id> MAC=<mac-address>"; exit 1; fi
-	docker exec -it $(CONTAINER) lua cli.lua wol $(CLIENT) $(MAC)
-
-cli-broadcast:
-	@if [ -z "$(MESSAGE)" ]; then echo "Usage: make cli-broadcast MESSAGE=<text>"; exit 1; fi
-	docker exec -it $(CONTAINER) lua cli.lua broadcast $(MESSAGE)
-
-cli-clients:
-	docker exec -it $(CONTAINER) lua cli.lua clients
-
-cli-quit:
-	docker exec -it $(CONTAINER) lua cli.lua quit
-
 run-local:
 	# Example: make run-local ARGS='--daemon --admin-port 65531'
 	lua server/server.lua $(ARGS)
@@ -80,4 +58,3 @@ server-down:
 
 client-up:
 	cd client && lua client.lua
-
