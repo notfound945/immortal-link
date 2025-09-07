@@ -36,7 +36,7 @@ local lastPing = 0
 
 -- Exponential backoff configuration
 -- retry exponent N => waits: 2^1, 2^2, ..., 2^N seconds
-local maxExponent = 7  -- default to 7 (2..128 seconds)
+local maxExponent = 10  -- default to 10 (2..1024 seconds)
 
 -- Parse retry exponent from arguments
 for i = 1, #arg do

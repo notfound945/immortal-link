@@ -16,7 +16,7 @@ Immortal Link is a lightweight server/client for remote messaging and WOL broadc
 # 启动服务端
 lua server/server.lua
 
-# 启动客户端（连接本机，默认最大重试阶数 7）
+# 启动客户端（连接本机，默认最大重试阶数 10）
 lua client/client.lua --host local
 
 # 自定义最大重试阶数（例如 10，最后一次等待 2^10 秒后退出）

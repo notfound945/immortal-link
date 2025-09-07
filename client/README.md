@@ -21,17 +21,16 @@ lua client/client.lua [--host <local|dev|ls|IP>] [--retry-exp N]
   - **dev**: 连接内置开发地址（见代码）
   - **ls**:  连接内置远端地址（见代码）
   - 也可直接传入 IP 地址，例如 `--host 192.168.1.10`
-- **--retry-exp N**
-  - 指数退避重连最大阶数 N（默认 7）
+  - 指数退避重连最大阶数 N（默认 10）
   - 重连等待序列为：2^1, 2^2, ..., 2^N 秒；超过 N 次后退出
 
 ### 示例
 ```bash
-# 本机连接，默认最大阶数 7（最后一次等待 128s）
+# 本机连接，默认最大阶数 10（最后一次等待 1024s）
 lua client/client.lua --host local
 
-# 指定远端 IP，最大阶数 10（最后一次等待 1024s 后退出）
-lua client/client.lua --host 1.2.3.4 --retry-exp 10
+# 指定远端 IP，最大阶数 12（最后一次等待 4096s 后退出）
+lua client/client.lua --host ls --retry-exp 12
 ```
 
 ### 心跳与在线检测
