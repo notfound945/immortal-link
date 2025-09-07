@@ -1,5 +1,5 @@
 local socket = require("socket")
-local wol = require("client.wol")
+local wol = require("wol")
 
 -- Default hosts and environments
 local defaultHost = "127.0.0.1"
@@ -30,6 +30,12 @@ local maxRetries = 10
 local retryInterval = 2  -- seconds
 local tcp = nil
 
+-- Heartbeat configuration (seconds)
+local heartbeatInterval = 10
+local heartbeatTimeout = 30
+local lastSeen = nil
+local lastPing = 0
+
 -- Function to connect to the server
 local function connectToServer()
     local newTcp = socket.tcp()
@@ -39,6 +45,8 @@ local function connectToServer()
     if success then
         print("Connected to server " .. host .. ":" .. port)
         newTcp:settimeout(1)  -- 1 second timeout
+        lastSeen = socket.gettime()
+        lastPing = 0
         return newTcp
     else
         newTcp:close()
@@ -95,10 +103,19 @@ while true do
     -- Receive server message
     local response, err = tcp:receive()
     if response then
-        print("[Server Message] " .. response)
+        lastSeen = socket.gettime()
+        if response ~= "PING" and response ~= "PONG" then
+            print("[Server Message] " .. response)
+        end
         
+        -- Heartbeat handling
+        if response == "PING" then
+            tcp:send("PONG\n")
+        elseif response == "PONG" then
+            -- no-op
+        else
         -- If server sends disconnect message, exit
-        if response:match("再见") or response:match("断开") then
+        if response:match("Bye") or response:match("closed") then
             break
         end
         
@@ -132,7 +149,7 @@ while true do
                 print("[WOL result sent to server]")
             end
         end
-        
+        end
     elseif err and err ~= "timeout" then
         print("Connection error: " .. tostring(err))
         print("Connection broken, attempting to reconnect...")
@@ -151,6 +168,29 @@ while true do
         -- print("Waiting for server messages...")
     end
     
+    -- Heartbeat: client proactively sends PING and checks timeout
+    do
+        local now = socket.gettime()
+        if now - (lastPing or 0) >= heartbeatInterval then
+            local ok, sendErr = tcp:send("PING\n")
+            if ok then
+                lastPing = now
+            else
+                -- keep silent for regular operations; optional minimal log
+                -- print("Heartbeat send failed: " .. tostring(sendErr))
+            end
+        end
+        if now - (lastSeen or now) > heartbeatTimeout then
+            print("Heartbeat timeout, attempting to reconnect...")
+            tcp:close()
+            tcp = autoReconnect()
+            if not tcp then
+                print("Reconnection failed, exiting program")
+                os.exit(1)
+            end
+        end
+    end
+
     -- Short sleep
     socket.sleep(0.1)
 end

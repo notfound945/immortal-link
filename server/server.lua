@@ -12,6 +12,10 @@ for i = 1, #arg do
     end
 end
 
+-- Heartbeat configuration (seconds)
+local heartbeatInterval = 10
+local heartbeatTimeout = 30
+
 -- Listen on port 65530 on all interfaces
 local server = assert(socket.bind("*", 65530))
 local ip, port = server:getsockname()
@@ -64,7 +68,9 @@ local function processNetwork()
         clients[clientId] = {
             socket = client,
             id = clientId,
-            connected = true
+            connected = true,
+            lastSeen = socket.gettime(),
+            lastPing = 0
         }
         client:settimeout(0)  -- set client non-blocking
         print("New client connected: " .. clientId)
@@ -79,6 +85,15 @@ local function processNetwork()
             local client = clientInfo.socket
             local line, err = client:receive()
             if line then
+                -- Update last seen on any message
+                clientInfo.lastSeen = socket.gettime()
+
+                -- Heartbeat handling
+                if line == "PING" then
+                    client:send("PONG\n")
+                elseif line == "PONG" then
+                    -- nothing else to do; lastSeen already updated
+                else
                 -- Check if it is a command result
                 local result = line:match("^RESULT:(.*)$")
                 if result then
@@ -95,10 +110,32 @@ local function processNetwork()
                 else
                     print("Received message from " .. clientId .. ": " .. line)
                 end
+                end
             elseif err and err ~= "timeout" then
                 print("Client " .. clientId .. " disconnected")
                 client:close()
                 clients[clientId] = nil
+            end
+
+            -- Heartbeat: send periodic PING
+            if clients[clientId] then
+                local now = socket.gettime()
+                if now - (clientInfo.lastPing or 0) >= heartbeatInterval then
+                    local ok, sendErr = client:send("PING\n")
+                    if ok then
+                        clientInfo.lastPing = now
+                    else
+                        print("Heartbeat send failed for " .. clientId .. ": " .. tostring(sendErr))
+                        client:close()
+                        clients[clientId] = nil
+                    end
+                end
+                -- Heartbeat: disconnect if timeout
+                if clients[clientId] and (now - (clientInfo.lastSeen or now) > heartbeatTimeout) then
+                    print("Client " .. clientId .. " timed out (no heartbeat)")
+                    client:close()
+                    clients[clientId] = nil
+                end
             end
         end
     end
