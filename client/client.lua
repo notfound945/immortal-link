@@ -13,6 +13,7 @@ end
 
 -- Default hosts and environments
 local defaultHost = "127.0.0.1"
+local lsHost = "x.x.x.x"
 local devHost = "192.168.115.129"
 local port = 65530
 
@@ -24,6 +25,8 @@ for i = 1, #arg do
             host = devHost
         elseif arg[i+1] == "local" then
             host = defaultHost
+        elseif arg[i+1] == "ls" then
+            host = lsHost
         else
             -- Support direct IP address specification
             host = arg[i+1]
