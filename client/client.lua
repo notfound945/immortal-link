@@ -11,6 +11,16 @@ local function appendLog(message)
     end
 end
 
+-- Protocol message "enum"
+local Message = {
+    PING = "PING",
+    PONG = "PONG",
+    AUTH_REQUIRED = "AUTH REQUIRED",
+    AUTH_OK = "AUTH OK",
+    AUTH_FAILED = "AUTH FAILED",
+    AUTH_DISABLED = "AUTH DISABLED",
+}
+
 -- Default hosts and environments
 local defaultHost = os.getenv("DEFAULT_HOST") or "127.0.0.1"
 local port = 65530
@@ -130,18 +140,18 @@ while true do
     local response, err = tcp:receive()
     if response then
         lastSeen = socket.gettime()
-        if response ~= "PING" and response ~= "PONG" then
+        if response ~= Message.PING and response ~= Message.PONG then
             print("[Server Message] " .. response)
         end
 
         -- Heartbeat handling
-        if response == "PING" then
-            tcp:send("PONG\n")
-        elseif response == "PONG" then
+        if response == Message.PING then
+            tcp:send(Message.PONG .. "\n")
+        elseif response == Message.PONG then
             -- no-op
         else
             -- Handle AUTH negotiation messages
-            if response == "AUTH REQUIRED" then
+            if response == Message.AUTH_REQUIRED then
                 if authToken and authToken ~= "" then
                     tcp:send("AUTH " .. authToken .. "\n")
                 else
@@ -149,12 +159,12 @@ while true do
                         "Server requires authentication but no token provided. Exiting.")
                     os.exit(1)
                 end
-            elseif response == "AUTH OK" then
+            elseif response == Message.AUTH_OK then
                 -- authenticated; continue
-            elseif response == "AUTH FAILED" then
+            elseif response == Message.AUTH_FAILED then
                 print("Authentication failed. Exiting.")
                 os.exit(1)
-            elseif response == "AUTH DISABLED" then
+            elseif response == Message.AUTH_DISABLED then
                 -- proceed
             else
                 -- If server sends disconnect message, exit
@@ -229,7 +239,7 @@ while true do
     do
         local now = socket.gettime()
         if now - (lastPing or 0) >= heartbeatInterval then
-            local ok, sendErr = tcp:send("PING\n")
+            local ok, sendErr = tcp:send(Message.PING .. "\n")
             if ok then
                 lastPing = now
             else
