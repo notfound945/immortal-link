@@ -5,8 +5,8 @@ local port = 65531
 
 -- Usage: lua cli.lua [--port <p>] <command...>
 for i = 1, #arg do
-    if arg[i] == "--port" and arg[i+1] then
-        local p = tonumber(arg[i+1])
+    if arg[i] == "--port" and arg[i + 1] then
+        local p = tonumber(arg[i + 1])
         if p then port = p end
     end
 end
@@ -47,8 +47,5 @@ end
 
 tcp:close()
 
-if #chunks > 0 then
-    print(table.concat(chunks, "\n"))
-end
-
+if #chunks > 0 then print(table.concat(chunks, "\n")) end
 

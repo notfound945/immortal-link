@@ -14,7 +14,7 @@ local function mac_to_binary(mac)
     local clean_mac = mac:gsub("[:-]", "")
     local binary = ""
     for i = 1, 12, 2 do
-        local byte = clean_mac:sub(i, i+1)
+        local byte = clean_mac:sub(i, i + 1)
         binary = binary .. string.char(tonumber(byte, 16))
     end
     return binary
@@ -29,23 +29,19 @@ end
 
 -- Send WOL packet
 function wol.send(mac, options)
-    if not is_valid_mac(mac) then
-        return false, "Invalid MAC address format"
-    end
-    
+    if not is_valid_mac(mac) then return false, "Invalid MAC address format" end
+
     options = options or {}
     local port = options.port or 9
     local broadcast = options.broadcast or "255.255.255.255"
-    
+
     local mac_binary = mac_to_binary(mac)
     local magic_packet = build_magic_packet(mac_binary)
-    
+
     -- Create UDP socket
     local udp = socket.udp()
-    if not udp then
-        return false, "Failed to create UDP socket"
-    end
-    
+    if not udp then return false, "Failed to create UDP socket" end
+
     -- Bind to IPv4 before enabling broadcast (required on macOS)
     local ok_bind, err_bind = udp:setsockname("0.0.0.0", 0)
     if not ok_bind then
@@ -58,15 +54,13 @@ function wol.send(mac, options)
         udp:close()
         return false, "Failed to set broadcast option: " .. (err or "")
     end
-    
+
     -- Send magic packet
     local bytes_sent, err = udp:sendto(magic_packet, broadcast, port)
     udp:close()
-    
-    if not bytes_sent then
-        return false, "Send failed: " .. (err or "")
-    end
-    
+
+    if not bytes_sent then return false, "Send failed: " .. (err or "") end
+
     return true, string.format("Magic packet sent to %s (port %d)", mac, port)
 end
 

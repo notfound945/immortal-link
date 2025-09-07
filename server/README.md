@@ -57,13 +57,14 @@ docker exec -it immortal-link lua cli.lua quit
 ## 本地运行（非容器）
 
 ```bash
-lua server/server.lua [--daemon] [--admin-port <port>]
+lua server/server.lua [--daemon] [--admin-port <port>] [--auth-token <token>]
 ```
 
 - 默认客户端监听端口：0.0.0.0:65530/TCP
 - 默认管理端口：127.0.0.1:65531/TCP（仅本机可访问）
 - `--daemon`：守护模式运行（不读取 stdin，仅处理网络与管理端口）
 - `--admin-port`：自定义管理端口（仅绑定在 127.0.0.1）
+- `--auth-token`：启用共享密钥认证（也可通过环境变量 `IMMORTAL_AUTH_TOKEN` 指定）
 
 > 说明：在容器中推荐通过 `docker exec` 调用 `cli.lua` 进行管理，如上方 CLI 示例。
 
@@ -104,6 +105,12 @@ sudo docker logs immortal-link
 
 ```bash
 cd ~/lua-docker/ && sudo make  && cd ~
+```
+
+### 启动容器
+
+```bash
+cd ~/lua-docker/ && sudo docker compose up -d && cd ~
 ```
 
 ### 重启容器

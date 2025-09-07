@@ -31,10 +31,24 @@ clean:
 	@echo "Removing registry image: $(REGISTRY_IMAGE)"
 	docker rmi $(REGISTRY_IMAGE) || true
 
+# Start container
+start:
+	@echo "Starting container: $(LOCAL_IMAGE)"
+	docker compose up -d --pull always
+
 # Restart container
 restart:
 	@echo "Restarting container: $(LOCAL_IMAGE)"
 	docker compose restart
+
+# Stop container
+stop:
+	@echo "Stopping container: $(LOCAL_IMAGE)"
+	docker compose down
+
+# View container logs
+logs:
+	docker compose logs -f $(CONTAINER)
 
 # CLI usage
 cli:
