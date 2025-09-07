@@ -1,0 +1,26 @@
+FROM alpine:latest
+
+RUN apk add --no-cache \
+    lua5.1 \
+    lua5.1-dev \
+    luarocks5.1 \
+    gcc \
+    musl-dev \
+    make \
+    git \
+    linux-headers \
+    && ln -sf /usr/bin/lua5.1 /usr/bin/lua \
+    && ln -sf /usr/bin/luarocks-5.1 /usr/bin/luarocks
+
+RUN luarocks install luasocket CFLAGS="-O2 -fPIC -DLUA_USE_LINUX" LIBFLAG="-shared"
+
+RUN apk del gcc musl-dev make git linux-headers
+
+WORKDIR /app
+
+COPY server/server.lua server/cli.lua /app/
+
+EXPOSE 65530
+
+CMD ["lua", "server.lua"]
+# CMD ["/bin/sh"]

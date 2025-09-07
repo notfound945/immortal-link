@@ -1,0 +1,43 @@
+# Multi-stage build - further reduce image size
+# Build stage
+FROM alpine:latest AS builder
+
+# Install build dependencies
+RUN apk add --no-cache \
+    lua5.1 \
+    lua5.1-dev \
+    luarocks5.1 \
+    gcc \
+    musl-dev \
+    make \
+    git \
+    linux-headers \
+    && ln -sf /usr/bin/lua5.1 /usr/bin/lua \
+    && ln -sf /usr/bin/luarocks-5.1 /usr/bin/luarocks
+
+# Install luasocket
+RUN luarocks install luasocket CFLAGS="-O2 -fPIC -DLUA_USE_LINUX" LIBFLAG="-shared"
+
+# Runtime stage
+FROM alpine:latest
+
+# Install runtime dependencies only
+RUN apk add --no-cache \
+    lua5.1 \
+    && ln -sf /usr/bin/lua5.1 /usr/bin/lua
+
+# Copy compiled luasocket from builder stage
+COPY --from=builder /usr/local/lib/lua/5.1/ /usr/local/lib/lua/5.1/
+COPY --from=builder /usr/local/share/lua/5.1/ /usr/local/share/lua/5.1/
+
+# Create app directory
+WORKDIR /app
+
+# Copy server files
+COPY server/server.lua server/cli.lua /app/
+
+# Expose port 65530
+EXPOSE 65530
+
+# Set entrypoint command
+CMD ["lua", "server.lua"]

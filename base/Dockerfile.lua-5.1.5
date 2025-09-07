@@ -1,0 +1,37 @@
+FROM alpine:latest
+
+LABEL maintainer="hailinpan"
+LABEL description="Lua 5.1.5 base image with common libraries"
+LABEL version="1.0"
+
+RUN apk add --no-cache \
+    lua5.1 \
+    lua5.1-dev \
+    luarocks5.1 \
+    gcc \
+    musl-dev \
+    make \
+    linux-headers \
+    curl \
+    ca-certificates \
+    && ln -sf /usr/bin/lua5.1 /usr/bin/lua \
+    && ln -sf /usr/bin/luarocks-5.1 /usr/bin/luarocks
+
+RUN luarocks install luasocket CFLAGS="-O2 -fPIC -DLUA_USE_LINUX" LIBFLAG="-shared" \
+    && luarocks install luafilesystem \
+    && luarocks install lua-cjson \
+    && luarocks install lpeg
+
+RUN apk del gcc musl-dev make linux-headers
+
+ENV LUA_VERSION=5.1.5
+ENV LUA_PATH="/usr/local/share/lua/5.1/?.lua;/usr/local/share/lua/5.1/?/init.lua;/usr/share/lua/5.1/?.lua;/usr/share/lua/5.1/?/init.lua;./?.lua"
+ENV LUA_CPATH="/usr/local/lib/lua/5.1/?.so;/usr/lib/lua/5.1/?.so;./?.so"
+
+WORKDIR /app
+
+RUN lua -v \
+    && luarocks --version \
+    && lua -e "print('Lua 5.1.5 base image build success!')"
+
+CMD ["lua", "-v"]
