@@ -3,9 +3,7 @@ local wol = require("server.wol")
 -- Test: valid MAC
 local function test_valid_mac()
     local mac = "6c:1f:f7:75:c7:0e"
-    local success, message = wol.send(mac, {
-        broadcast = "192.168.115.191"
-    })
+    local success, message = wol.send(mac, {broadcast = "192.168.115.191"})
     assert(success, "Test failed: " .. message)
     print("Passed: valid MAC")
 end
@@ -29,7 +27,7 @@ end
 -- Test: custom options
 local function test_custom_options()
     local mac = "01:23:45:67:89:AB"
-    local options = { port = 7, broadcast = "192.168.1.255" }
+    local options = {port = 7, broadcast = "192.168.1.255"}
     local success, message = wol.send(mac, options)
     assert(success, "Test failed: " .. message)
     print("Passed: custom port and broadcast")

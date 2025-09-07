@@ -23,6 +23,23 @@ lua client/client.lua --host local
 lua client/client.lua --host 127.0.0.1 --retry-exp 12
 ```
 
+## 连接认证（可选）
+
+为提升安全性，支持在 TCP 建连后进行共享密钥认证：
+
+- 服务端：通过参数 `--auth-token <token>` 或环境变量 `IMMORTAL_AUTH_TOKEN` 启用认证
+- 客户端：通过参数 `--auth-token <token>` 或环境变量 `IMMORTAL_AUTH_TOKEN` 在连接后发送 `AUTH <token>`
+
+示例：
+
+```bash
+# 启动服务端（启用认证）
+IMMORTAL_AUTH_TOKEN=secret lua server/server.lua --daemon
+
+# 启动客户端（提供 token）
+IMMORTAL_AUTH_TOKEN=secret lua client/client.lua --host <server-ip>
+```
+
 ## 文档
 - 客户端
 
