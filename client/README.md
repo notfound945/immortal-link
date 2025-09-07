@@ -12,7 +12,7 @@
 ### 启动
 在项目根目录执行：
 ```bash
-lua client/client.lua [--host <local|dev|ls|IP>] [--retry-exp N]
+lua client/client.lua [--host <IP>] [--retry-exp N]
 ```
 
 ### 参数说明
@@ -30,7 +30,7 @@ lua client/client.lua [--host <local|dev|ls|IP>] [--retry-exp N]
 lua client/client.lua --host local
 
 # 指定远端 IP，最大阶数 12（最后一次等待 4096s 后退出）
-lua client/client.lua --host ls --retry-exp 12
+lua client/client.lua --host 192.168.1.10 --retry-exp 12
 ```
 
 ### 心跳与在线检测

@@ -3,9 +3,9 @@
 # Define target working directory
 WORK_DIR="/root/immortal-link"
 # Define process identification keyword (unique to avoid killing wrong processes)
-PROCESS_KEY="lua client.lua --host ls"
+PROCESS_KEY="lua client.lua"
 # Define client startup command (using relative path after changing directory)
-START_CMD="lua client.lua --host ls &"
+START_CMD="lua client.lua &"
 # Define log file path (relative to working directory)
 LOG_FILE="start.log"
 

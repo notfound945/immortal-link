@@ -2,7 +2,7 @@ local wol = require("server.wol")
 
 -- Test: valid MAC
 local function test_valid_mac()
-    local mac = "6c:1f:f7:75:c7:0e"
+    local mac = "bc:12:d7:f5:c7:ae"
     local success, message = wol.send(mac, {broadcast = "192.168.115.191"})
     assert(success, "Test failed: " .. message)
     print("Passed: valid MAC")

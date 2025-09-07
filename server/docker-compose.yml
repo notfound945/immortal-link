@@ -5,6 +5,9 @@ services:
     image: immortal-link:latest
     container_name: immortal-link
     command: ["lua", "server.lua", "--daemon"]
+    environment:
+      - IMMORTAL_AUTH_TOKEN=${IMMORTAL_AUTH_TOKEN}
+      - TZ=Asia/Shanghai
     ports:
       - "65530:65530"
     stdin_open: true
