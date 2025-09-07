@@ -36,6 +36,11 @@ start:
 	@echo "Starting container: $(LOCAL_IMAGE)"
 	docker compose up -d --pull always
 
+# Restart container
+restart:
+	@echo "Restarting container: $(LOCAL_IMAGE)"
+	docker compose restart
+
 # Stop container
 stop:
 	@echo "Stopping container: $(LOCAL_IMAGE)"

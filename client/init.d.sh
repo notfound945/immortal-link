@@ -1,52 +1,54 @@
 #!/bin/sh /etc/rc.common
+# Copyright (C) 2006 OpenWrt.org
 
-# Service name and description
+# Service configuration
 NAME="immortal-link"
-DESCRIPTION="Starts and stops the immortal-link service"
-
-# Startup priority (99 means starting late, ensuring system services are ready)
+DESCRIPTION="Service for managing immortal-link application"
 START=99
-# Shutdown priority
 STOP=10
 
-# Define script path
-SCRIPT_PATH="$HOME/immortal-link/start.sh"
+# Make it run as a daemon
+USE_PROCD=1 
 
-start() {
-    echo "Starting $NAME..."
-    
-    # Check if script exists and is executable
+# Path to the main script
+SCRIPT_PATH="/root/immortal-link/start.sh"
+
+# Validate script existence and executability
+validate_script() {
     if [ ! -f "$SCRIPT_PATH" ]; then
-        echo "Error: $SCRIPT_PATH not found!"
+        echo "Error: $SCRIPT_PATH not found"
         return 1
     fi
     
     if [ ! -x "$SCRIPT_PATH" ]; then
-        echo "Error: $SCRIPT_PATH is not executable!"
-        chmod +x "$SCRIPT_PATH"
-        echo "Made $SCRIPT_PATH executable"
+        echo "Error: $SCRIPT_PATH is not executable, fixing permissions"
+        chmod +x "$SCRIPT_PATH" || return 1
     fi
-    
-    # Start the script and run in background
-    $SCRIPT_PATH &
-    echo "$NAME started successfully"
+    return 0
 }
 
-stop() {
+# Start service
+start_service() {
+    validate_script || return 1
+    echo "Starting $NAME..."
+    $SCRIPT_PATH &
+    echo "$NAME started"
+}
+
+# Stop service
+stop_service() {
     echo "Stopping $NAME..."
-    
-    # Find and terminate related processes
     if pgrep -f "$SCRIPT_PATH" > /dev/null; then
         pkill -f "$SCRIPT_PATH"
-        echo "$NAME stopped successfully"
+        echo "$NAME stopped"
     else
         echo "$NAME is not running"
     fi
 }
 
-# Restart function
-restart() {
-    stop
+# Restart service
+restart_service() {
+    stop_service
     sleep 2
-    start
+    start_service
 }
