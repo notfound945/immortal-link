@@ -26,8 +26,7 @@ print("Admin port: 127.0.0.1:" .. adminPort .. (daemonMode and " (daemon)" or ""
 print("Commands:")
 print("  send <clientId[,clientId2,...]> <message> - send to specific clients")
 print("  broadcast <message> - broadcast message")
--- exec command removed
-print("  wol <MAC>   - send WOL wake command")
+print("  wol <clientId[,clientId2,...]> <MAC> - send WOL to clients")
 print("  clients     - list connected clients")
 print("  quit        - shutdown server")
 print("Enter commands (Ctrl+D for EOF), or use cli to send via admin port")
@@ -53,6 +52,38 @@ local function printBoth(msg)
         -- Ensure newline termination
         currentResponder(msg .. "\n")
     end
+end
+
+-- Helper: print online clients list
+local function printOnlineClientsList()
+    printBoth("Online clients:")
+    local count = 0
+    for cid, cinfo in pairs(clients) do
+        if cinfo.connected then
+            printBoth("  " .. cid)
+            count = count + 1
+        end
+    end
+    printBoth("Total " .. count .. " clients online")
+end
+
+-- Helper: send single line to target client IDs, with optional onSent callback
+local function sendLineToTargets(targets, line, onSent)
+    local sent = 0
+    local missing = {}
+    for _, id in ipairs(targets) do
+        local cinfo = clients[id]
+        if cinfo and cinfo.connected then
+            local ok = cinfo.socket:send(line .. "\n")
+            if ok then
+                sent = sent + 1
+                if onSent then onSent(id) end
+            end
+        else
+            table.insert(missing, id)
+        end
+    end
+    return sent, missing
 end
 
 -- Set server non-blocking
@@ -152,15 +183,7 @@ local function processCommand(input)
         local targetsStr, payload = message:match("^(%S+)%s+(.+)$")
         if not targetsStr or not payload or targetsStr == "" or payload == "" then
             printBoth("Usage: send <clientId[,clientId2,...]> <message>")
-            printBoth("Online clients:")
-            local count = 0
-            for cid, cinfo in pairs(clients) do
-                if cinfo.connected then
-                    printBoth("  " .. cid)
-                    count = count + 1
-                end
-            end
-            printBoth("Total " .. count .. " clients online")
+            printOnlineClientsList()
             return true
         end
 
@@ -171,18 +194,7 @@ local function processCommand(input)
             if id ~= "" then table.insert(targets, id) end
         end
 
-        local sent = 0
-        local missing = {}
-        for _, id in ipairs(targets) do
-            local cinfo = clients[id]
-            if cinfo and cinfo.connected then
-                local ok = cinfo.socket:send(payload .. "\n")
-                if ok then sent = sent + 1 end
-            else
-                table.insert(missing, id)
-            end
-        end
-
+        local sent, missing = sendLineToTargets(targets, payload, nil)
         printBoth("Message sent to " .. sent .. " clients")
         if #missing > 0 then
             printBoth("Not found/offline: " .. table.concat(missing, ", "))
@@ -201,29 +213,32 @@ local function processCommand(input)
         printBoth("Broadcast sent to " .. count .. " clients")
         
     -- exec removed
-    elseif cmd == "wol" and message ~= "" then
-        local count = 0
-        for clientId, clientInfo in pairs(clients) do
-            if clientInfo.connected then
-                local success = clientInfo.socket:send("WOL:" .. message .. "\n")
-                if success then
-                    count = count + 1
-                    -- record context
-                    pendingCommands[clientId] = "wol " .. message
-                end
-            end
+    elseif cmd == "wol" then
+        -- Expect: wol <clientId[,clientId2,...]> <MAC>
+        local targetsStr, mac = message:match("^(%S+)%s+(.+)$")
+        if not targetsStr or not mac or targetsStr == "" or mac == "" then
+            printBoth("Usage: wol <clientId[,clientId2,...]> <MAC>")
+            printOnlineClientsList()
+            return true
         end
-        printBoth("WOL command (MAC: " .. message .. ") sent to " .. count .. " clients")
+
+        local targets = {}
+        for id in targetsStr:gmatch("[^,]+") do
+            id = id:gsub("^%s+", ""):gsub("%s+$", "")
+            if id ~= "" then table.insert(targets, id) end
+        end
+
+        local onSent = function(id)
+            pendingCommands[id] = "wol " .. mac
+        end
+        local sent, missing = sendLineToTargets(targets, "WOL:" .. mac, onSent)
+        printBoth("WOL command (MAC: " .. mac .. ") sent to " .. sent .. " clients")
+        if #missing > 0 then
+            printBoth("Not found/offline: " .. table.concat(missing, ", "))
+        end
         
     elseif cmd == "clients" then
-        local count = 0
-        for clientId, clientInfo in pairs(clients) do
-            if clientInfo.connected then
-                printBoth("  " .. clientId)
-                count = count + 1
-            end
-        end
-        printBoth("Total " .. count .. " clients online")
+        printOnlineClientsList()
         
     elseif cmd == "quit" then
         for clientId, clientInfo in pairs(clients) do
@@ -239,13 +254,13 @@ local function processCommand(input)
         
     -- exec usage removed
     elseif cmd == "wol" and message == "" then
-        printBoth("Usage: wol <MAC>")
-        printBoth("Example: wol 00:11:22:33:44:55")
-        printBoth("Example: wol 00-11-22-33-44-55")
+        printBoth("Usage: wol <clientId[,clientId2,...]> <MAC>")
+        printBoth("Example: wol client-1 00:11:22:33:44:55")
+        printBoth("Example: wol client-1,client-2 00-11-22-33-44-55")
         
     else
         printBoth("Unknown command: " .. input)
-        printBoth("Available commands: send <clientId[,clientId2,...]> <message>, broadcast <message>, wol <MAC>, clients, quit")
+        printBoth("Available commands: send <clientId[,clientId2,...]> <message>, broadcast <message>, wol <clientId[,clientId2,...]> <MAC>, clients, quit")
     end
     
     return true  -- continue

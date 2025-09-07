@@ -47,8 +47,8 @@ docker exec -it immortal-link /bin/sh
 ## CLI usage
 
 ```bash
-docker exec -it immortal-link lua cli.lua send hello
-docker exec -it immortal-link lua cli.lua wol 6c:1f:f7:75:c7:0e
+docker exec -it immortal-link lua cli.lua send client-1 hello
+docker exec -it immortal-link lua cli.lua wol client-1 6c:1f:f7:75:c7:0e
 docker exec -it immortal-link lua cli.lua broadcast hello
 docker exec -it immortal-link lua cli.lua clients
 docker exec -it immortal-link lua cli.lua quit
