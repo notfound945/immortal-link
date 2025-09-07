@@ -19,6 +19,7 @@ local Message = {
     AUTH_OK = "AUTH OK",
     AUTH_FAILED = "AUTH FAILED",
     AUTH_DISABLED = "AUTH DISABLED",
+    SERVER_SHUTDOWN = "SERVER CLOSED",
 }
 
 -- Default hosts and environments
@@ -168,7 +169,7 @@ while true do
                 -- proceed
             else
                 -- If server sends disconnect message, exit
-                if response:match("Bye") or response:match("closed") then
+                if response == Message.SERVER_SHUTDOWN then
                     appendLog("RECV CLOSE " .. response)
                     break
                 end

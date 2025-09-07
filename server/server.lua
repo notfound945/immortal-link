@@ -25,6 +25,7 @@ local Message = {
     AUTH_OK = "AUTH OK",
     AUTH_FAILED = "AUTH FAILED",
     AUTH_DISABLED = "AUTH DISABLED",
+    SERVER_SHUTDOWN = "SERVER CLOSED",
 }
 
 -- Admin CLI command "enum"
@@ -302,7 +303,7 @@ local function processCommand(input)
     elseif cmd == Command.QUIT then
         for clientId, clientInfo in pairs(clients) do
             if clientInfo.connected then
-                clientInfo.socket:send("Server is shutting down. Bye!\n")
+                clientInfo.socket:send(Message.SERVER_SHUTDOWN .. "\n")
                 clientInfo.socket:close()
             end
         end
@@ -356,7 +357,7 @@ if daemonMode then
                             c.socket:close()
                         end
                     end
-                    ainfo.socket:send("Server closed\n")
+                    ainfo.socket:send(Message.SERVER_SHUTDOWN .. "\n")
                     ainfo.socket:close()
                     adminClients[aid] = nil
                     server:close()

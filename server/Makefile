@@ -34,7 +34,7 @@ clean:
 # Start container
 start:
 	@echo "Starting container: $(LOCAL_IMAGE)"
-	docker compose up -d --pull always
+	docker compose up -d
 
 # Restart container
 restart:
