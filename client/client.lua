@@ -26,8 +26,6 @@ for i = 1, #arg do
 end
 
 -- Connection configuration
-local maxRetries = 10
-local retryInterval = 2  -- seconds
 local tcp = nil
 
 -- Heartbeat configuration (seconds)
@@ -35,6 +33,22 @@ local heartbeatInterval = 10
 local heartbeatTimeout = 30
 local lastSeen = nil
 local lastPing = 0
+
+-- Exponential backoff configuration
+-- retry exponent N => waits: 2^1, 2^2, ..., 2^N seconds
+local maxExponent = 7  -- default to 7 (2..128 seconds)
+
+-- Parse retry exponent from arguments
+for i = 1, #arg do
+    if arg[i] == "--retry-exp" and arg[i+1] then
+        local n = tonumber(arg[i+1])
+        if n then
+            if n < 1 then n = 1 end
+            maxExponent = n
+        end
+        break
+    end
+end
 
 -- Function to connect to the server
 local function connectToServer()
@@ -56,27 +70,25 @@ end
 
 -- Auto-reconnect function
 local function autoReconnect()
-    local retryCount = 0
-    
-    while retryCount < maxRetries do
-        print("Attempting to reconnect to server... (Attempt " .. (retryCount + 1) .. "/" .. maxRetries .. ")")
-        
+    local exponent = 1
+    while exponent <= maxExponent do
+        print("Attempting to reconnect to server... (try " .. exponent .. "/" .. maxExponent .. ")")
+
         local newTcp, err = connectToServer()
         if newTcp then
             print("Reconnected successfully!")
             return newTcp
         else
             print("Reconnection failed: " .. tostring(err))
-            retryCount = retryCount + 1
-            
-            if retryCount < maxRetries then
-                print("Waiting " .. retryInterval .. " seconds before retrying...")
-                socket.sleep(retryInterval)
-            end
+            -- wait 2^exponent seconds
+            local waitSeconds = 2 ^ exponent
+            print("Waiting " .. waitSeconds .. " seconds before retrying...")
+            socket.sleep(waitSeconds)
+            exponent = exponent + 1
         end
     end
-    
-    print("Reconnection failed, maximum retries reached (" .. maxRetries .. "), exiting program")
+
+    print("Reconnection failed, waited up to 2^" .. maxExponent .. " seconds, exiting program")
     return nil
 end
 

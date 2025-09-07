@@ -4,56 +4,25 @@
 
 Immortal Link is a lightweight server/client for remote messaging and WOL broadcasting with multi-client support.
 
-Note:
-Use an image matching your system architecture. For **amd64** hosts use **amd64** images; for **arm64** hosts use **arm64** images.
+## 功能特性
+- 基于 TCP 的长连接通信
+- PING/PONG 心跳，实时在线检测
+- 客户端指数退避重连（2^n 秒，支持 `--retry-exp` 配置）
+- 服务器多客户端管理与广播
+- WOL 唤醒（客户端发送 UDP 广播，端口 9）
 
-
-## Build
-
-+ ARM64
-
+## 快速开始
 ```bash
-docker build -f server/Dockerfile.server -t immortal-link:latest .
+# 启动服务端
+lua server/server.lua
+
+# 启动客户端（连接本机，默认最大重试阶数 7）
+lua client/client.lua --host local
+
+# 自定义最大重试阶数（例如 10，最后一次等待 2^10 秒后退出）
+lua client/client.lua --host 127.0.0.1 --retry-exp 10
 ```
 
-+ AMD64
-
-```bash 
-docker build -f server/Dockerfile.server --platform linux/amd64 -t immortal-link:latest .
-```
-
-## Push image
-
-```bash
-docker tag immortal-link:latest registry.cn-shenzhen.aliyuncs.com/notfound945/immortal-link:latest
-docker push registry.cn-shenzhen.aliyuncs.com/notfound945/immortal-link:latest
-```
-
-## Pull image
-
-```bash
-docker pull registry.cn-shenzhen.aliyuncs.com/notfound945/immortal-link:latest
-docker tag registry.cn-shenzhen.aliyuncs.com/notfound945/immortal-link:latest immortal-link:latest
-```
-
-## Run
-
-```bash
-docker run -it --rm -p 65530:65530 --name immortal-link immortal-link:latest
-```
-
-## Enter container
-
-```bash
-docker exec -it immortal-link /bin/sh
-```
-
-## CLI usage
-
-```bash
-docker exec -it immortal-link lua cli.lua send hello
-docker exec -it immortal-link lua cli.lua wol 6c:1f:f7:75:c7:0e
-docker exec -it immortal-link lua cli.lua broadcast hello
-docker exec -it immortal-link lua cli.lua clients
-docker exec -it immortal-link lua cli.lua quit
-```
+## 文档
+- 客户端文档：client/README.md
+- 服务端文档：server/README.md
