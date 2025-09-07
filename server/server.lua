@@ -24,7 +24,7 @@ print("=== Immortal Link Server ===")
 print("Listening: " .. ip .. ":" .. port)
 print("Admin port: 127.0.0.1:" .. adminPort .. (daemonMode and " (daemon)" or ""))
 print("Commands:")
-print("  send <message>     - send message to all clients")
+print("  send <clientId[,clientId2,...]> <message> - send to specific clients")
 print("  broadcast <message> - broadcast message")
 -- exec command removed
 print("  wol <MAC>   - send WOL wake command")
@@ -147,17 +147,46 @@ local function processCommand(input)
     cmd = cmd or input
     message = message or ""
     
-    if cmd == "send" and message ~= "" then
-        local count = 0
-        for clientId, clientInfo in pairs(clients) do
-            if clientInfo.connected then
-                local success = clientInfo.socket:send(message .. "\n")
-                if success then
+    if cmd == "send" then
+        -- Expect: send <clientId[,clientId2,...]> <message>
+        local targetsStr, payload = message:match("^(%S+)%s+(.+)$")
+        if not targetsStr or not payload or targetsStr == "" or payload == "" then
+            printBoth("Usage: send <clientId[,clientId2,...]> <message>")
+            printBoth("Online clients:")
+            local count = 0
+            for cid, cinfo in pairs(clients) do
+                if cinfo.connected then
+                    printBoth("  " .. cid)
                     count = count + 1
                 end
             end
+            printBoth("Total " .. count .. " clients online")
+            return true
         end
-        printBoth("Message sent to " .. count .. " clients")
+
+        local targets = {}
+        for id in targetsStr:gmatch("[^,]+") do
+            -- trim spaces
+            id = id:gsub("^%s+", ""):gsub("%s+$", "")
+            if id ~= "" then table.insert(targets, id) end
+        end
+
+        local sent = 0
+        local missing = {}
+        for _, id in ipairs(targets) do
+            local cinfo = clients[id]
+            if cinfo and cinfo.connected then
+                local ok = cinfo.socket:send(payload .. "\n")
+                if ok then sent = sent + 1 end
+            else
+                table.insert(missing, id)
+            end
+        end
+
+        printBoth("Message sent to " .. sent .. " clients")
+        if #missing > 0 then
+            printBoth("Not found/offline: " .. table.concat(missing, ", "))
+        end
         
     elseif cmd == "broadcast" and message ~= "" then
         local count = 0
@@ -205,9 +234,6 @@ local function processCommand(input)
         end
         return false  -- 退出
         
-    elseif cmd == "send" and message == "" then
-        printBoth("Usage: send <message>")
-        
     elseif cmd == "broadcast" and message == "" then
         printBoth("Usage: broadcast <message>")
         
@@ -219,7 +245,7 @@ local function processCommand(input)
         
     else
         printBoth("Unknown command: " .. input)
-        printBoth("Available commands: send <message>, broadcast <message>, wol <MAC>, clients, quit")
+        printBoth("Available commands: send <clientId[,clientId2,...]> <message>, broadcast <message>, wol <MAC>, clients, quit")
     end
     
     return true  -- continue
