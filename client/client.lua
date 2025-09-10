@@ -1,6 +1,6 @@
 local socket = require("socket")
 local wol = require("wol")
-local proto = require("proto")
+local proto = require("client_proto")
 local TYPE = proto.TYPE
 
 -- Simple file append logger for commands and execution status

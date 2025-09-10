@@ -1,5 +1,5 @@
 local socket = require("socket")
-local proto = require("proto")
+local proto = require("server_proto")
 
 -- Binary frame protocol
 -- Frame: [4-byte BE length L][1-byte type T][L-1 bytes payload]
