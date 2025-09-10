@@ -35,6 +35,8 @@ local Command = {
 -- Heartbeat configuration (seconds)
 local heartbeatInterval = 10
 local heartbeatTimeout = 30
+-- Authentication handshake timeout for pending connections (seconds)
+local authHandshakeTimeout = 5
 
 -- Listen on port 65530 on all interfaces
 local server = assert(socket.bind("*", 65530))
@@ -59,6 +61,9 @@ local clients = {}
 local clientCounter = 0
 -- Commands sent to clients for logging context
 local pendingCommands = {}
+
+-- Pending (pre-auth) connections when auth is required
+local pending = {}
 
 -- Admin port: listen on loopback
 local adminServer = assert(socket.bind("127.0.0.1", adminPort))
@@ -117,25 +122,92 @@ local function processNetwork()
     -- Accept new client
     local client = server:accept()
     if client then
-        clientCounter = clientCounter + 1
-        local clientId = "client-" .. clientCounter
-        clients[clientId] = {
-            socket = client,
-            id = clientId,
-            connected = true,
-            lastSeen = socket.gettime(),
-            lastPing = 0,
-            authenticated = not authRequired
-        }
         client:settimeout(0) -- set client non-blocking
-        print("New client connected: " .. clientId)
+        if authRequired then
+            -- Do not assign clientId before AUTH_OK
+            pending[client] = {
+                socket = client,
+                connected = true,
+                lastSeen = socket.gettime(),
+                lastPing = 0,
+                connectedAt = socket.gettime(),
+                rx = { state = "header", need = 4, buf = "", frameLen = 0 },
+            }
+            print("New connection pending auth")
+            sendFrame(client, TYPE.AUTH_REQUIRED, "")
+        else
+            -- Auth not required: assign id immediately
+            clientCounter = clientCounter + 1
+            local clientId = "client-" .. clientCounter
+            clients[clientId] = {
+                socket = client,
+                id = clientId,
+                connected = true,
+                lastSeen = socket.gettime(),
+                lastPing = 0,
+                authenticated = true,
+                rx = { state = "header", need = 4, buf = "", frameLen = 0 },
+            }
+            print("New client connected: " .. clientId)
+            sendFrame(client, TYPE.TEXT, "Welcome! Your ID is: " .. clientId)
+        end
+    end
 
-        -- Initialize binary RX state
-        clients[clientId].rx = { state = "header", need = 4, buf = "", frameLen = 0 }
-
-        -- Send welcome and auth (binary)
-        sendFrame(client, TYPE.TEXT, "Welcome! Your ID is: " .. clientId)
-        if authRequired then sendFrame(client, TYPE.AUTH_REQUIRED, "") end
+    -- Handle pending clients (auth handshake)
+    for key, pinfo in pairs(pending) do
+        if pinfo.connected then
+            local frames, rx, err = proto.readSome(pinfo.socket, pinfo.rx, 10)
+            pinfo.rx = rx
+            for _, f in ipairs(frames) do
+                pinfo.lastSeen = socket.gettime()
+                if f.type == TYPE.AUTH then
+                    local provided = f.payload
+                    if provided == authToken then
+                        -- Promote to authenticated clients and assign clientId
+                        clientCounter = clientCounter + 1
+                        local clientId = "client-" .. clientCounter
+                        clients[clientId] = {
+                            socket = pinfo.socket,
+                            id = clientId,
+                            connected = true,
+                            lastSeen = socket.gettime(),
+                            lastPing = 0,
+                            authenticated = true,
+                            rx = { state = "header", need = 4, buf = "", frameLen = 0 },
+                        }
+                        sendFrame(pinfo.socket, TYPE.AUTH_OK, "")
+                        sendFrame(pinfo.socket, TYPE.TEXT,
+                                  "Welcome! Your ID is: " .. clientId)
+                        print("New client authenticated: " .. clientId)
+                        pending[key] = nil
+                    else
+                        -- Wrong token: notify and close
+                        sendFrame(pinfo.socket, TYPE.AUTH_FAILED, "")
+                        pinfo.socket:close()
+                        pending[key] = nil
+                    end
+                else
+                    -- Any non-AUTH frame before authentication is a failure
+                    sendFrame(pinfo.socket, TYPE.AUTH_FAILED, "")
+                    pinfo.socket:close()
+                    pending[key] = nil
+                end
+            end
+            if err and err ~= "timeout" then
+                print("Pending client disconnected during auth")
+                pinfo.socket:close()
+                pending[key] = nil
+            else
+                -- Check handshake timeout
+                local now = socket.gettime()
+                if (pinfo.connectedAt or now) and
+                    (now - (pinfo.connectedAt or now) > authHandshakeTimeout) then
+                    sendFrame(pinfo.socket, TYPE.AUTH_FAILED, "")
+                    pinfo.socket:close()
+                    pending[key] = nil
+                end
+            end
+        end
     end
 
     -- Handle existing clients
@@ -146,25 +218,7 @@ local function processNetwork()
             clientInfo.rx = rx
             for _, f in ipairs(frames) do
                 clientInfo.lastSeen = socket.gettime()
-                if not clientInfo.authenticated then
-                    if f.type == TYPE.AUTH then
-                        local provided = f.payload
-                        if authRequired then
-                            if provided == authToken then
-                                clientInfo.authenticated = true
-                                sendFrame(client, TYPE.AUTH_OK, "")
-                            else
-                                sendFrame(client, TYPE.AUTH_FAILED, "")
-                                client:close(); clients[clientId] = nil
-                            end
-                        else
-                            clientInfo.authenticated = true
-                        end
-                    else
-                        sendFrame(client, TYPE.AUTH_REQUIRED, "")
-                        client:close(); clients[clientId] = nil
-                    end
-                elseif clients[clientId] and clientInfo.authenticated then
+                if clients[clientId] and clientInfo.authenticated then
                     if f.type == TYPE.PING then
                         sendFrame(client, TYPE.PONG, "")
                     elseif f.type == TYPE.PONG then
@@ -290,6 +344,12 @@ local function processCommand(input)
             if clientInfo.connected then
                 sendFrame(clientInfo.socket, TYPE.SERVER_SHUTDOWN, "")
                 clientInfo.socket:close()
+            end
+        end
+        -- Close any pending unauthenticated connections
+        for _, pinfo in pairs(pending) do
+            if pinfo.connected then
+                pinfo.socket:close()
             end
         end
         return false -- 退出
