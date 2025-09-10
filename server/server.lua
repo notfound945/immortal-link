@@ -1,5 +1,6 @@
 local socket = require("socket")
 local proto = require("server_proto")
+local ClientPool = require("client_pool")
 
 -- Binary frame protocol
 -- Frame: [4-byte BE length L][1-byte type T][L-1 bytes payload]
@@ -56,14 +57,12 @@ print("  quit        - shutdown server")
 print("Enter commands (Ctrl+D for EOF), or use cli to send via admin port")
 print("==============================")
 
--- Connected clients
-local clients = {}
-local clientCounter = 0
+-- Connected/pending managed by pool
+local pool = ClientPool.new()
+local clients = pool.clients
+local pending = pool.pending
 -- Commands sent to clients for logging context
 local pendingCommands = {}
-
--- Pending (pre-auth) connections when auth is required
-local pending = {}
 
 -- Admin port: listen on loopback
 local adminServer = assert(socket.bind("127.0.0.1", adminPort))
@@ -125,29 +124,12 @@ local function processNetwork()
         client:settimeout(0) -- set client non-blocking
         if authRequired then
             -- Do not assign clientId before AUTH_OK
-            pending[client] = {
-                socket = client,
-                connected = true,
-                lastSeen = socket.gettime(),
-                lastPing = 0,
-                connectedAt = socket.gettime(),
-                rx = { state = "header", need = 4, buf = "", frameLen = 0 },
-            }
+            pool:addPending(client)
             print("New connection pending auth")
             sendFrame(client, TYPE.AUTH_REQUIRED, "")
         else
             -- Auth not required: assign id immediately
-            clientCounter = clientCounter + 1
-            local clientId = "client-" .. clientCounter
-            clients[clientId] = {
-                socket = client,
-                id = clientId,
-                connected = true,
-                lastSeen = socket.gettime(),
-                lastPing = 0,
-                authenticated = true,
-                rx = { state = "header", need = 4, buf = "", frameLen = 0 },
-            }
+            local clientId = select(1, pool:addClientNoAuth(client))
             print("New client connected: " .. clientId)
             sendFrame(client, TYPE.TEXT, "Welcome! Your ID is: " .. clientId)
         end
@@ -164,39 +146,28 @@ local function processNetwork()
                     local provided = f.payload
                     if provided == authToken then
                         -- Promote to authenticated clients and assign clientId
-                        clientCounter = clientCounter + 1
-                        local clientId = "client-" .. clientCounter
-                        clients[clientId] = {
-                            socket = pinfo.socket,
-                            id = clientId,
-                            connected = true,
-                            lastSeen = socket.gettime(),
-                            lastPing = 0,
-                            authenticated = true,
-                            rx = { state = "header", need = 4, buf = "", frameLen = 0 },
-                        }
+                        local clientId = select(1, pool:promotePending(pinfo.socket))
                         sendFrame(pinfo.socket, TYPE.AUTH_OK, "")
                         sendFrame(pinfo.socket, TYPE.TEXT,
                                   "Welcome! Your ID is: " .. clientId)
                         print("New client authenticated: " .. clientId)
-                        pending[key] = nil
                     else
                         -- Wrong token: notify and close
                         sendFrame(pinfo.socket, TYPE.AUTH_FAILED, "")
                         pinfo.socket:close()
-                        pending[key] = nil
+                        pool:removePending(pinfo.socket)
                     end
                 else
                     -- Any non-AUTH frame before authentication is a failure
                     sendFrame(pinfo.socket, TYPE.AUTH_FAILED, "")
                     pinfo.socket:close()
-                    pending[key] = nil
+                    pool:removePending(pinfo.socket)
                 end
             end
             if err and err ~= "timeout" then
                 print("Pending client disconnected during auth")
                 pinfo.socket:close()
-                pending[key] = nil
+                pool:removePending(pinfo.socket)
             else
                 -- Check handshake timeout
                 local now = socket.gettime()
@@ -204,7 +175,7 @@ local function processNetwork()
                     (now - (pinfo.connectedAt or now) > authHandshakeTimeout) then
                     sendFrame(pinfo.socket, TYPE.AUTH_FAILED, "")
                     pinfo.socket:close()
-                    pending[key] = nil
+                    pool:removePending(pinfo.socket)
                 end
             end
         end
@@ -243,7 +214,8 @@ local function processNetwork()
             if err and err ~= "timeout" then
                 print("Client " .. clientId .. " disconnected")
                 client:close()
-                clients[clientId] = nil
+                pendingCommands[clientId] = nil
+                pool:markDisconnected(clientId)
             end
 
             -- Heartbeat: send periodic PING
@@ -258,7 +230,8 @@ local function processNetwork()
                             "Heartbeat send failed for " .. clientId .. ": " ..
                                 tostring(sendErr))
                         client:close()
-                        clients[clientId] = nil
+                        pendingCommands[clientId] = nil
+                        pool:markDisconnected(clientId)
                     end
                 end
                 -- Heartbeat: disconnect if timeout
@@ -266,7 +239,8 @@ local function processNetwork()
                     (now - (clientInfo.lastSeen or now) > heartbeatTimeout) then
                     print("Client " .. clientId .. " timed out (no heartbeat)")
                     client:close()
-                    clients[clientId] = nil
+                    pendingCommands[clientId] = nil
+                    pool:markDisconnected(clientId)
                 end
             end
         end
@@ -345,12 +319,21 @@ local function processCommand(input)
                 sendFrame(clientInfo.socket, TYPE.SERVER_SHUTDOWN, "")
                 clientInfo.socket:close()
             end
+            pendingCommands[clientId] = nil
+            pool:markDisconnected(clientId)
         end
-        -- Close any pending unauthenticated connections
+        -- Close any pending unauthenticated connections (with explicit logs)
         for _, pinfo in pairs(pending) do
             if pinfo.connected then
+                local pip, pport = pinfo.socket:getpeername()
+                if pip and pport then
+                    printBoth("Closing pending unauth connection from " .. pip .. ":" .. pport)
+                else
+                    printBoth("Closing pending unauth connection")
+                end
                 pinfo.socket:close()
             end
+            pool:removePending(pinfo.socket)
         end
         return false -- 退出
 
