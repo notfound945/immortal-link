@@ -1,4 +1,10 @@
 local socket = require("socket")
+local proto = require("proto")
+
+-- Binary frame protocol
+-- Frame: [4-byte BE length L][1-byte type T][L-1 bytes payload]
+local TYPE = proto.TYPE
+local sendFrame = proto.sendFrame
 
 -- Simple argument parsing: supports --daemon and --admin-port <port>
 local daemonMode = false
@@ -16,17 +22,6 @@ for i = 1, #arg do
 end
 
 local authRequired = (authToken ~= nil and authToken ~= "")
-
--- Protocol message "enum" for AUTH states
-local Message = {
-    PING = "PING",
-    PONG = "PONG",
-    AUTH_REQUIRED = "AUTH REQUIRED",
-    AUTH_OK = "AUTH OK",
-    AUTH_FAILED = "AUTH FAILED",
-    AUTH_DISABLED = "AUTH DISABLED",
-    SERVER_SHUTDOWN = "SERVER CLOSED",
-}
 
 -- Admin CLI command "enum"
 local Command = {
@@ -94,14 +89,15 @@ local function printOnlineClientsList()
     printBoth("Total " .. count .. " clients online")
 end
 
--- Helper: send single line to target client IDs, with optional onSent callback
-local function sendLineToTargets(targets, line, onSent)
+-- Helper: send one binary frame to target client IDs, with optional onSent callback
+-- use shared helper from proto
+local function sendFrameToTargets(targets, mtype, payload, onSent)
     local sent = 0
     local missing = {}
     for _, id in ipairs(targets) do
         local cinfo = clients[id]
         if cinfo and cinfo.connected then
-            local ok = cinfo.socket:send(line .. "\n")
+            local ok = proto.sendFrame(cinfo.socket, mtype, payload)
             if ok then
                 sent = sent + 1
                 if onSent then onSent(id) end
@@ -134,74 +130,63 @@ local function processNetwork()
         client:settimeout(0) -- set client non-blocking
         print("New client connected: " .. clientId)
 
-        -- Send welcome message
-        client:send("Welcome! Your ID is: " .. clientId .. "\n")
-        if authRequired then client:send(Message.AUTH_REQUIRED .. "\n") end
+        -- Initialize binary RX state
+        clients[clientId].rx = { state = "header", need = 4, buf = "", frameLen = 0 }
+
+        -- Send welcome and auth (binary)
+        sendFrame(client, TYPE.TEXT, "Welcome! Your ID is: " .. clientId)
+        if authRequired then sendFrame(client, TYPE.AUTH_REQUIRED, "") end
     end
 
     -- Handle existing clients
     for clientId, clientInfo in pairs(clients) do
         if clientInfo.connected then
             local client = clientInfo.socket
-            local line, err = client:receive()
-            if line then
-                -- Authentication gate: only proceed to normal handling after AUTH
+            local frames, rx, err = proto.readSome(client, clientInfo.rx, 10)
+            clientInfo.rx = rx
+            for _, f in ipairs(frames) do
+                clientInfo.lastSeen = socket.gettime()
                 if not clientInfo.authenticated then
-                    local provided = line:match("^AUTH%s+(.+)$")
-                    if provided then
+                    if f.type == TYPE.AUTH then
+                        local provided = f.payload
                         if authRequired then
                             if provided == authToken then
                                 clientInfo.authenticated = true
-                                clientInfo.lastSeen = socket.gettime()
-                                client:send(Message.AUTH_OK .. "\n")
+                                sendFrame(client, TYPE.AUTH_OK, "")
                             else
-                                client:send(Message.AUTH_FAILED .. "\n")
-                                client:close()
-                                clients[clientId] = nil
+                                sendFrame(client, TYPE.AUTH_FAILED, "")
+                                client:close(); clients[clientId] = nil
                             end
                         else
                             clientInfo.authenticated = true
-                            clientInfo.lastSeen = socket.gettime()
-                            client:send(Message.AUTH_DISABLED .. "\n")
                         end
                     else
-                        client:send(Message.AUTH_REQUIRED .. "\n")
-                        client:close()
-                        clients[clientId] = nil
+                        sendFrame(client, TYPE.AUTH_REQUIRED, "")
+                        client:close(); clients[clientId] = nil
                     end
                 elseif clients[clientId] and clientInfo.authenticated then
-                    -- Update last seen on any message
-                    clientInfo.lastSeen = socket.gettime()
-
-                    -- Heartbeat handling
-                    if line == Message.PING then
-                        client:send(Message.PONG .. "\n")
-                    elseif line == Message.PONG then
-                        -- nothing else to do; lastSeen already updated
+                    if f.type == TYPE.PING then
+                        sendFrame(client, TYPE.PONG, "")
+                    elseif f.type == TYPE.PONG then
+                        -- no-op
+                    elseif f.type == TYPE.RESULT then
+                        local result = f.payload
+                        local timestamp = os.date("%Y-%m-%d %H:%M:%S")
+                        local fullCommand = pendingCommands[clientId] or "unknown"
+                        pendingCommands[clientId] = nil
+                        printBoth("Received command result from " .. clientId)
+                        printBoth("Executed command: " .. fullCommand)
+                        printBoth("Received at: " .. timestamp)
+                        printBoth("=" .. string.rep("=", 50))
+                        printBoth(result)
+                    elseif f.type == TYPE.TEXT then
+                        print("Received message from " .. clientId .. ": " .. f.payload)
                     else
-                        -- Check if it is a command result
-                        local result = line:match("^RESULT:(.*)$")
-                        if result then
-                            -- Print to stdout (and echo to admin connection if present)
-                            local timestamp = os.date("%Y-%m-%d %H:%M:%S")
-                            local fullCommand =
-                                pendingCommands[clientId] or "unknown"
-                            pendingCommands[clientId] = nil
-
-                            printBoth("Received command result from " ..
-                                          clientId)
-                            printBoth("Executed command: " .. fullCommand)
-                            printBoth("Received at: " .. timestamp)
-                            printBoth("=" .. string.rep("=", 50))
-                            printBoth(result)
-                        else
-                            print(
-                                "Received message from " .. clientId .. ": " ..
-                                    line)
-                        end
+                        -- ignore unknown types
                     end
                 end
-            elseif err and err ~= "timeout" then
+            end
+            if err and err ~= "timeout" then
                 print("Client " .. clientId .. " disconnected")
                 client:close()
                 clients[clientId] = nil
@@ -211,7 +196,7 @@ local function processNetwork()
             if clients[clientId] and clientInfo.authenticated then
                 local now = socket.gettime()
                 if now - (clientInfo.lastPing or 0) >= heartbeatInterval then
-                    local ok, sendErr = client:send(Message.PING .. "\n")
+                    local ok, sendErr = sendFrame(client, TYPE.PING, "")
                     if ok then
                         clientInfo.lastPing = now
                     else
@@ -256,7 +241,7 @@ local function processCommand(input)
             if id ~= "" then table.insert(targets, id) end
         end
 
-        local sent, missing = sendLineToTargets(targets, payload, nil)
+        local sent, missing = sendFrameToTargets(targets, TYPE.TEXT, payload, nil)
         printBoth("Message sent to " .. sent .. " clients")
         if #missing > 0 then
             printBoth("Not found/offline: " .. table.concat(missing, ", "))
@@ -266,8 +251,8 @@ local function processCommand(input)
         local count = 0
         for clientId, clientInfo in pairs(clients) do
             if clientInfo.connected then
-                local success = clientInfo.socket:send(
-                                    "[Broadcast] " .. message .. "\n")
+                local success = sendFrame(clientInfo.socket, TYPE.TEXT,
+                                          "[Broadcast] " .. message)
                 if success then count = count + 1 end
             end
         end
@@ -290,7 +275,7 @@ local function processCommand(input)
         end
 
         local onSent = function(id) pendingCommands[id] = Command.WOL .. " " .. mac end
-        local sent, missing = sendLineToTargets(targets, "WOL:" .. mac, onSent)
+        local sent, missing = sendFrameToTargets(targets, TYPE.WOL, mac, onSent)
         printBoth("WOL command (MAC: " .. mac .. ") sent to " .. sent ..
                       " clients")
         if #missing > 0 then
@@ -303,7 +288,7 @@ local function processCommand(input)
     elseif cmd == Command.QUIT then
         for clientId, clientInfo in pairs(clients) do
             if clientInfo.connected then
-                clientInfo.socket:send(Message.SERVER_SHUTDOWN .. "\n")
+                sendFrame(clientInfo.socket, TYPE.SERVER_SHUTDOWN, "")
                 clientInfo.socket:close()
             end
         end

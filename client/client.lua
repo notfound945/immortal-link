@@ -1,5 +1,7 @@
 local socket = require("socket")
 local wol = require("wol")
+local proto = require("proto")
+local TYPE = proto.TYPE
 
 -- Simple file append logger for commands and execution status
 local function appendLog(message)
@@ -11,16 +13,7 @@ local function appendLog(message)
     end
 end
 
--- Protocol message "enum"
-local Message = {
-    PING = "PING",
-    PONG = "PONG",
-    AUTH_REQUIRED = "AUTH REQUIRED",
-    AUTH_OK = "AUTH OK",
-    AUTH_FAILED = "AUTH FAILED",
-    AUTH_DISABLED = "AUTH DISABLED",
-    SERVER_SHUTDOWN = "SERVER CLOSED",
-}
+-- Text enums removed; client now speaks binary frames
 
 -- Default hosts and environments
 local defaultHost = os.getenv("DEFAULT_HOST") or "127.0.0.1"
@@ -78,11 +71,10 @@ local function connectToServer()
     if success then
         print("Connected to server " .. host .. ":" .. port)
         newTcp:settimeout(1) -- 1 second timeout
-        -- Perform optional AUTH handshake if token provided
+        -- Perform optional AUTH handshake if token provided (binary)
         if authToken and authToken ~= "" then
-            -- small sleep to allow greeting
             socket.sleep(0.05)
-            newTcp:send("AUTH " .. authToken .. "\n")
+            proto.sendFrame(newTcp, TYPE.AUTH, authToken)
         end
         lastSeen = socket.gettime()
         lastPing = 0
@@ -128,6 +120,7 @@ if not tcp then
 end
 
 print("Waiting for server messages...")
+local rx = proto.newRx()
 
 -- Use the implementation provided by wol.lua to send WOL packets
 local function sendWolPacket(mac)
@@ -137,85 +130,59 @@ end
 
 -- Main loop: receive server messages and execute commands, with auto-reconnect
 while true do
-    -- Receive server message
-    local response, err = tcp:receive()
-    if response then
+    -- Receive frames from server (binary)
+    local frames, newRx, err = proto.readSome(tcp, rx, 10)
+    rx = newRx
+    if #frames > 0 then
         lastSeen = socket.gettime()
-        if response ~= Message.PING and response ~= Message.PONG then
-            print("[Server Message] " .. response)
-        end
-
-        -- Heartbeat handling
-        if response == Message.PING then
-            tcp:send(Message.PONG .. "\n")
-        elseif response == Message.PONG then
-            -- no-op
-        else
-            -- Handle AUTH negotiation messages
-            if response == Message.AUTH_REQUIRED then
+        for _, f in ipairs(frames) do
+            if f.type == TYPE.PING then
+                proto.sendFrame(tcp, TYPE.PONG, "")
+            elseif f.type == TYPE.PONG then
+                -- no-op
+            elseif f.type == TYPE.AUTH_REQUIRED then
                 if authToken and authToken ~= "" then
-                    tcp:send("AUTH " .. authToken .. "\n")
+                    proto.sendFrame(tcp, TYPE.AUTH, authToken)
                 else
-                    print(
-                        "Server requires authentication but no token provided. Exiting.")
+                    print("Server requires authentication but no token provided. Exiting.")
                     os.exit(1)
                 end
-            elseif response == Message.AUTH_OK then
-                -- authenticated; continue
-            elseif response == Message.AUTH_FAILED then
+            elseif f.type == TYPE.AUTH_OK then
+                -- ok
+            elseif f.type == TYPE.AUTH_FAILED then
                 print("Authentication failed. Exiting.")
                 os.exit(1)
-            elseif response == Message.AUTH_DISABLED then
-                -- proceed
-            else
-                -- If server sends disconnect message, exit
-                if response == Message.SERVER_SHUTDOWN then
-                    appendLog("RECV CLOSE " .. response)
-                    break
-                end
-
-                -- CMD execution request handling removed
-
-                -- Check if it's a WOL command request
-                local macAddress = response:match("^WOL:(.+)$")
-                if macAddress then
-                    print("[Executing WOL] MAC address: " .. macAddress)
-                    appendLog("RECV WOL " .. macAddress)
-                    local success, result = sendWolPacket(macAddress)
-
-                    local statusMsg = success and "[WOL Successful] " or
-                                          "[WOL Failed] "
-                    print(statusMsg .. result)
-                    appendLog("EXEC WOL " .. macAddress .. " -> " ..
-                                  (success and "OK" or "FAIL") .. ": " ..
-                                  tostring(result))
-
-                    -- Send result back to server
-                    local sendSuccess, sendErr = tcp:send(
-                                                     "RESULT:" .. result .. "\n")
-                    if not sendSuccess then
-                        print("Failed to send WOL result: " .. tostring(sendErr))
-                        appendLog("SEND RESULT FAIL - " .. tostring(sendErr))
-                        print(
-                            "Connection may be broken, attempting to reconnect...")
-
-                        -- Close current connection
-                        tcp:close()
-
-                        -- Attempt to reconnect
-                        tcp = autoReconnect()
-                        if not tcp then
-                            print("Reconnection failed, exiting program")
-                            os.exit(1)
-                        end
-                    else
-                        print("[WOL result sent to server]")
-                        appendLog("SEND RESULT OK")
+            elseif f.type == TYPE.SERVER_SHUTDOWN then
+                appendLog("RECV CLOSE SERVER_SHUTDOWN")
+                break
+            elseif f.type == TYPE.WOL then
+                local macAddress = f.payload
+                print("[Executing WOL] MAC address: " .. macAddress)
+                appendLog("RECV WOL " .. macAddress)
+                local success, result = sendWolPacket(macAddress)
+                local statusMsg = success and "[WOL Successful] " or "[WOL Failed] "
+                print(statusMsg .. result)
+                appendLog("EXEC WOL " .. macAddress .. " -> " .. (success and "OK" or "FAIL") .. ": " .. tostring(result))
+                local ok, sendErr = proto.sendFrame(tcp, TYPE.RESULT, result)
+                if not ok then
+                    print("Failed to send WOL result: " .. tostring(sendErr))
+                    appendLog("SEND RESULT FAIL - " .. tostring(sendErr))
+                    print("Connection may be broken, attempting to reconnect...")
+                    tcp:close()
+                    tcp = autoReconnect()
+                    if not tcp then
+                        print("Reconnection failed, exiting program")
+                        os.exit(1)
                     end
+                else
+                    print("[WOL result sent to server]")
+                    appendLog("SEND RESULT OK")
                 end
-                if not macAddress then
-                    appendLog("RECV MSG " .. response)
-                end
+            elseif f.type == TYPE.TEXT then
+                print("[Server Message] " .. f.payload)
+                appendLog("RECV MSG " .. f.payload)
+            else
+                -- ignore unknown types
             end
         end
     elseif err and err ~= "timeout" then
@@ -240,7 +207,7 @@ while true do
     do
         local now = socket.gettime()
         if now - (lastPing or 0) >= heartbeatInterval then
-            local ok, sendErr = tcp:send(Message.PING .. "\n")
+            local ok, sendErr = proto.sendFrame(tcp, TYPE.PING, "")
             if ok then
                 lastPing = now
             else
