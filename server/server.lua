@@ -1,4 +1,11 @@
 local socket = require("socket")
+local proto = require("server_proto")
+local ClientPool = require("client_pool")
+
+-- Binary frame protocol
+-- Frame: [4-byte BE length L][1-byte type T][L-1 bytes payload]
+local TYPE = proto.TYPE
+local sendFrame = proto.sendFrame
 
 -- Simple argument parsing: supports --daemon and --admin-port <port>
 local daemonMode = false
@@ -17,17 +24,6 @@ end
 
 local authRequired = (authToken ~= nil and authToken ~= "")
 
--- Protocol message "enum" for AUTH states
-local Message = {
-    PING = "PING",
-    PONG = "PONG",
-    AUTH_REQUIRED = "AUTH REQUIRED",
-    AUTH_OK = "AUTH OK",
-    AUTH_FAILED = "AUTH FAILED",
-    AUTH_DISABLED = "AUTH DISABLED",
-    SERVER_SHUTDOWN = "SERVER CLOSED",
-}
-
 -- Admin CLI command "enum"
 local Command = {
     SEND = "send",
@@ -40,6 +36,8 @@ local Command = {
 -- Heartbeat configuration (seconds)
 local heartbeatInterval = 10
 local heartbeatTimeout = 30
+-- Authentication handshake timeout for pending connections (seconds)
+local authHandshakeTimeout = 5
 
 -- Listen on port 65530 on all interfaces
 local server = assert(socket.bind("*", 65530))
@@ -59,9 +57,10 @@ print("  quit        - shutdown server")
 print("Enter commands (Ctrl+D for EOF), or use cli to send via admin port")
 print("==============================")
 
--- Connected clients
-local clients = {}
-local clientCounter = 0
+-- Connected/pending managed by pool
+local pool = ClientPool.new()
+local clients = pool.clients
+local pending = pool.pending
 -- Commands sent to clients for logging context
 local pendingCommands = {}
 
@@ -94,14 +93,15 @@ local function printOnlineClientsList()
     printBoth("Total " .. count .. " clients online")
 end
 
--- Helper: send single line to target client IDs, with optional onSent callback
-local function sendLineToTargets(targets, line, onSent)
+-- Helper: send one binary frame to target client IDs, with optional onSent callback
+-- use shared helper from proto
+local function sendFrameToTargets(targets, mtype, payload, onSent)
     local sent = 0
     local missing = {}
     for _, id in ipairs(targets) do
         local cinfo = clients[id]
         if cinfo and cinfo.connected then
-            local ok = cinfo.socket:send(line .. "\n")
+            local ok = proto.sendFrame(cinfo.socket, mtype, payload)
             if ok then
                 sent = sent + 1
                 if onSent then onSent(id) end
@@ -121,97 +121,108 @@ local function processNetwork()
     -- Accept new client
     local client = server:accept()
     if client then
-        clientCounter = clientCounter + 1
-        local clientId = "client-" .. clientCounter
-        clients[clientId] = {
-            socket = client,
-            id = clientId,
-            connected = true,
-            lastSeen = socket.gettime(),
-            lastPing = 0,
-            authenticated = not authRequired
-        }
         client:settimeout(0) -- set client non-blocking
-        print("New client connected: " .. clientId)
+        if authRequired then
+            -- Do not assign clientId before AUTH_OK
+            pool:addPending(client)
+            print("New connection pending auth")
+            sendFrame(client, TYPE.AUTH_REQUIRED, "")
+        else
+            -- Auth not required: assign id immediately
+            local clientId = select(1, pool:addClientNoAuth(client))
+            print("New client connected: " .. clientId)
+            sendFrame(client, TYPE.TEXT, "Welcome! Your ID is: " .. clientId)
+        end
+    end
 
-        -- Send welcome message
-        client:send("Welcome! Your ID is: " .. clientId .. "\n")
-        if authRequired then client:send(Message.AUTH_REQUIRED .. "\n") end
+    -- Handle pending clients (auth handshake)
+    for key, pinfo in pairs(pending) do
+        if pinfo.connected then
+            local frames, rx, err = proto.readSome(pinfo.socket, pinfo.rx, 10)
+            pinfo.rx = rx
+            for _, f in ipairs(frames) do
+                pinfo.lastSeen = socket.gettime()
+                if f.type == TYPE.AUTH then
+                    local provided = f.payload
+                    if provided == authToken then
+                        -- Promote to authenticated clients and assign clientId
+                        local clientId = select(1, pool:promotePending(pinfo.socket))
+                        sendFrame(pinfo.socket, TYPE.AUTH_OK, "")
+                        sendFrame(pinfo.socket, TYPE.TEXT,
+                                  "Welcome! Your ID is: " .. clientId)
+                        print("New client authenticated: " .. clientId)
+                    else
+                        -- Wrong token: notify and close
+                        sendFrame(pinfo.socket, TYPE.AUTH_FAILED, "")
+                        pinfo.socket:close()
+                        pool:removePending(pinfo.socket)
+                    end
+                else
+                    -- Any non-AUTH frame before authentication is a failure
+                    sendFrame(pinfo.socket, TYPE.AUTH_FAILED, "")
+                    pinfo.socket:close()
+                    pool:removePending(pinfo.socket)
+                end
+            end
+            if err and err ~= "timeout" then
+                print("Pending client disconnected during auth")
+                pinfo.socket:close()
+                pool:removePending(pinfo.socket)
+            else
+                -- Check handshake timeout
+                local now = socket.gettime()
+                if (pinfo.connectedAt or now) and
+                    (now - (pinfo.connectedAt or now) > authHandshakeTimeout) then
+                    sendFrame(pinfo.socket, TYPE.AUTH_FAILED, "")
+                    pinfo.socket:close()
+                    pool:removePending(pinfo.socket)
+                end
+            end
+        end
     end
 
     -- Handle existing clients
     for clientId, clientInfo in pairs(clients) do
         if clientInfo.connected then
             local client = clientInfo.socket
-            local line, err = client:receive()
-            if line then
-                -- Authentication gate: only proceed to normal handling after AUTH
-                if not clientInfo.authenticated then
-                    local provided = line:match("^AUTH%s+(.+)$")
-                    if provided then
-                        if authRequired then
-                            if provided == authToken then
-                                clientInfo.authenticated = true
-                                clientInfo.lastSeen = socket.gettime()
-                                client:send(Message.AUTH_OK .. "\n")
-                            else
-                                client:send(Message.AUTH_FAILED .. "\n")
-                                client:close()
-                                clients[clientId] = nil
-                            end
-                        else
-                            clientInfo.authenticated = true
-                            clientInfo.lastSeen = socket.gettime()
-                            client:send(Message.AUTH_DISABLED .. "\n")
-                        end
+            local frames, rx, err = proto.readSome(client, clientInfo.rx, 10)
+            clientInfo.rx = rx
+            for _, f in ipairs(frames) do
+                clientInfo.lastSeen = socket.gettime()
+                if clients[clientId] and clientInfo.authenticated then
+                    if f.type == TYPE.PING then
+                        sendFrame(client, TYPE.PONG, "")
+                    elseif f.type == TYPE.PONG then
+                        -- no-op
+                    elseif f.type == TYPE.RESULT then
+                        local result = f.payload
+                        local timestamp = os.date("%Y-%m-%d %H:%M:%S")
+                        local fullCommand = pendingCommands[clientId] or "unknown"
+                        pendingCommands[clientId] = nil
+                        printBoth("Received command result from " .. clientId)
+                        printBoth("Executed command: " .. fullCommand)
+                        printBoth("Received at: " .. timestamp)
+                        printBoth("=" .. string.rep("=", 50))
+                        printBoth(result)
+                    elseif f.type == TYPE.TEXT then
+                        print("Received message from " .. clientId .. ": " .. f.payload)
                     else
-                        client:send(Message.AUTH_REQUIRED .. "\n")
-                        client:close()
-                        clients[clientId] = nil
-                    end
-                elseif clients[clientId] and clientInfo.authenticated then
-                    -- Update last seen on any message
-                    clientInfo.lastSeen = socket.gettime()
-
-                    -- Heartbeat handling
-                    if line == Message.PING then
-                        client:send(Message.PONG .. "\n")
-                    elseif line == Message.PONG then
-                        -- nothing else to do; lastSeen already updated
-                    else
-                        -- Check if it is a command result
-                        local result = line:match("^RESULT:(.*)$")
-                        if result then
-                            -- Print to stdout (and echo to admin connection if present)
-                            local timestamp = os.date("%Y-%m-%d %H:%M:%S")
-                            local fullCommand =
-                                pendingCommands[clientId] or "unknown"
-                            pendingCommands[clientId] = nil
-
-                            printBoth("Received command result from " ..
-                                          clientId)
-                            printBoth("Executed command: " .. fullCommand)
-                            printBoth("Received at: " .. timestamp)
-                            printBoth("=" .. string.rep("=", 50))
-                            printBoth(result)
-                        else
-                            print(
-                                "Received message from " .. clientId .. ": " ..
-                                    line)
-                        end
+                        -- ignore unknown types
                     end
                 end
-            elseif err and err ~= "timeout" then
+            end
+            if err and err ~= "timeout" then
                 print("Client " .. clientId .. " disconnected")
                 client:close()
-                clients[clientId] = nil
+                pendingCommands[clientId] = nil
+                pool:markDisconnected(clientId)
             end
 
             -- Heartbeat: send periodic PING
             if clients[clientId] and clientInfo.authenticated then
                 local now = socket.gettime()
                 if now - (clientInfo.lastPing or 0) >= heartbeatInterval then
-                    local ok, sendErr = client:send(Message.PING .. "\n")
+                    local ok, sendErr = sendFrame(client, TYPE.PING, "")
                     if ok then
                         clientInfo.lastPing = now
                     else
@@ -219,7 +230,8 @@ local function processNetwork()
                             "Heartbeat send failed for " .. clientId .. ": " ..
                                 tostring(sendErr))
                         client:close()
-                        clients[clientId] = nil
+                        pendingCommands[clientId] = nil
+                        pool:markDisconnected(clientId)
                     end
                 end
                 -- Heartbeat: disconnect if timeout
@@ -227,7 +239,8 @@ local function processNetwork()
                     (now - (clientInfo.lastSeen or now) > heartbeatTimeout) then
                     print("Client " .. clientId .. " timed out (no heartbeat)")
                     client:close()
-                    clients[clientId] = nil
+                    pendingCommands[clientId] = nil
+                    pool:markDisconnected(clientId)
                 end
             end
         end
@@ -256,7 +269,7 @@ local function processCommand(input)
             if id ~= "" then table.insert(targets, id) end
         end
 
-        local sent, missing = sendLineToTargets(targets, payload, nil)
+        local sent, missing = sendFrameToTargets(targets, TYPE.TEXT, payload, nil)
         printBoth("Message sent to " .. sent .. " clients")
         if #missing > 0 then
             printBoth("Not found/offline: " .. table.concat(missing, ", "))
@@ -266,8 +279,8 @@ local function processCommand(input)
         local count = 0
         for clientId, clientInfo in pairs(clients) do
             if clientInfo.connected then
-                local success = clientInfo.socket:send(
-                                    "[Broadcast] " .. message .. "\n")
+                local success = sendFrame(clientInfo.socket, TYPE.TEXT,
+                                          "[Broadcast] " .. message)
                 if success then count = count + 1 end
             end
         end
@@ -290,7 +303,7 @@ local function processCommand(input)
         end
 
         local onSent = function(id) pendingCommands[id] = Command.WOL .. " " .. mac end
-        local sent, missing = sendLineToTargets(targets, "WOL:" .. mac, onSent)
+        local sent, missing = sendFrameToTargets(targets, TYPE.WOL, mac, onSent)
         printBoth("WOL command (MAC: " .. mac .. ") sent to " .. sent ..
                       " clients")
         if #missing > 0 then
@@ -303,9 +316,24 @@ local function processCommand(input)
     elseif cmd == Command.QUIT then
         for clientId, clientInfo in pairs(clients) do
             if clientInfo.connected then
-                clientInfo.socket:send(Message.SERVER_SHUTDOWN .. "\n")
+                sendFrame(clientInfo.socket, TYPE.SERVER_SHUTDOWN, "")
                 clientInfo.socket:close()
             end
+            pendingCommands[clientId] = nil
+            pool:markDisconnected(clientId)
+        end
+        -- Close any pending unauthenticated connections (with explicit logs)
+        for _, pinfo in pairs(pending) do
+            if pinfo.connected then
+                local pip, pport = pinfo.socket:getpeername()
+                if pip and pport then
+                    printBoth("Closing pending unauth connection from " .. pip .. ":" .. pport)
+                else
+                    printBoth("Closing pending unauth connection")
+                end
+                pinfo.socket:close()
+            end
+            pool:removePending(pinfo.socket)
         end
         return false -- 退出
 
